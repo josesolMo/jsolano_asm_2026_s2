@@ -145,7 +145,44 @@ Se analizó una onda cuadrada de $50\text{ Hz}$ bajo las mismas condiciones de m
 En la Figura \ref{fig:cuadrada}, el espectro refleja la presencia exclusiva de armónicos impares ($50\text{ Hz}, 150\text{ Hz}, \dots$), cuyas amplitudes decaen de forma inversamente proporcional ($1/k$), coincidiendo con la teoría de las Series de Fourier.
 
 \section{Etapa 3: Detección de Ecos y Correlación Cruzada}
-\textit{Nota: Esta sección se desarrollará e implementará en la siguiente etapa del proyecto, enfocándose en estimar el parámetro $\tau$ utilizando operaciones de correlación rápida basadas en la FFT.}
+
+\subsection{Generación de la Señal Emitida y Eco Sintético}
+Para evaluar la capacidad de detección del radar acústico, se sintetizó un pulso de transmisión $x[n]$ compuesto por una senoide de $1\text{ kHz}$ modulada por una ventana Hanning de $20\text{ ms}$ a una frecuencia de muestreo $F_s = 8\text{ kHz}$. La señal recibida $y[n]$ se construyó agregando dos ecos atenuados con retardos conocidos ($n_1 = 150$ y $n_2 = 320$ muestras) y ruido blanco gaussiano aditivo (AWGN), como se ilustra en la Figura \ref{fig:senial_eco}.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.9\linewidth]{imagenes/etapa3_senial_eco.png}
+\caption{Señal acústica emitida $x[n]$ (arriba) y señal recibida $y[n]$ con ecos atenuados y contaminación por ruido (abajo).}
+\label{fig:senial_eco}
+\end{figure}
+
+\subsection{Estimación del Tiempo de Vuelo (ToF) mediante Correlación}
+La determinación del tiempo de vuelo ($\tau$) se realizó evaluando la correlación cruzada en el dominio del tiempo ($\phi_{xy}[m]$) y en el dominio de la frecuencia mediante el Teorema de Convolución:
+\begin{equation}
+\phi_{xy}[m] = \mathcal{F}^{-1}\left\{ Y[k] \cdot X^*[k] \right\}
+\end{equation}
+donde $X^*[k]$ representa el complejo conjugado de la FFT de la señal emitida $x[n]$. Para evitar el solapamiento circular, se aplicó un acolchado de ceros (\textit{zero-padding}) hasta la siguiente potencia de 2 ($N_{\text{fft}} \ge N_x + N_y - 1$) previo al cálculo espectral.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.9\linewidth]{imagenes/etapa3_correlacion.png}
+\caption{Detección de ecos mediante correlación cruzada directa frente al método espectral basado en FFT.}
+\label{fig:correlacion}
+\end{figure}
+
+Como se observa en la Figura \ref{fig:correlacion}, ambas implementaciones (directa y espectral) se superponen de manera idéntica, validando la equivalencia teórica de ambos enfoques. Se identifican con precisión el pico del eco principal en $m = 150$ y la reflexión secundaria en $m = 320$. A partir del desfase principal $m^*$, el tiempo de vuelo se calcula como $\tau = m^* / F_s = 18.75\text{ ms}$, permitiendo estimar la distancia al objeto mediante $d = (v_s \cdot \tau) / 2 = 3.22\text{ m}$.
+
+\subsection{Análisis de Rendimiento Computacional}
+Se midió el tiempo de ejecución de ambos métodos para longitudes de señal $N \in \{2^5, 2^6, \dots, 2^{10}\}$, cuyos resultados se presentan en la Figura \ref{fig:tiempos_corr}.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.85\linewidth]{imagenes/etapa3_tiempos_correlacion.png}
+\caption{Comparación del tiempo de ejecución entre correlación directa ($\mathcal{O}(N^2)$) y correlación basada en FFT ($\mathcal{O}(N \log_2 N)$).}
+\label{fig:tiempos_corr}
+\end{figure}
+
+Aunque en el entorno interpretado de Python la sobrecarga de la recursión manual en la FFT genera un tiempo base mayor para $N \le 1024$ frente a la implementación vectorial directa de NumPy, la menor pendiente asintótica de la FFT ($\mathcal{O}(N \log_2 N)$) confirma su superioridad operacional para procesamiento en tiempo real en sistemas empotrados.
 
 \section{Conclusiones y Recomendaciones}
 La implementación algorítmica demuestra experimentalmente la drástica reducción de complejidad computacional lograda por la FFT. Esta reducción de $\mathcal{O}(N^2)$ a $\mathcal{O}(N \log_2 N)$ resulta indispensable para garantizar que el sistema empotrado del radar acústico ejecute la estimación de retardo en tiempo real sin saturar los recursos de procesamiento.
