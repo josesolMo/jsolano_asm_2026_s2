@@ -1,97 +1,157 @@
 \documentclass[conference]{IEEEtran}
 \usepackage[utf8]{inputenc}
-\usepackage[spanish,english]{babel}
+\usepackage[spanish,es-tabla]{babel}
 \usepackage{cite}
 \usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{algorithm}
 \usepackage{graphicx}
 \usepackage{textcomp}
 \usepackage{xcolor}
-\usepackage{hyperref}
-
-% Path de imágenes
-\graphicspath{{./imagenes/}}
 
 \begin{document}
 
-\title{Diseño de un Sistema de Radar Acústico para Estimación de Distancia}
+\title{Análisis Espectral y Comparación de Rendimiento DFT vs. FFT para el Procesamiento de Señales Acústicas}
 
-\author{
-    \IEEEauthorblockN{José Andrés Solano Mora}
-    \IEEEauthorblockA{\textit{Escuela de Ingeniería en Computadores} \\
-    \textit{Instituto Tecnológico de Costa Rica}\\
-    Cartago, Costa Rica}
+\author{\IEEEauthorblockN{José Andrés Solano Mora}
+\IEEEauthorblockA{\textit{Carrera de Ingeniería en Computadores} \\
+\textit{Tecnológico de Costa Rica}\\
+Cartago, Costa Rica}
 }
 
 \maketitle
 
-% --- ABSTRACT ---
-\begin{otherlanguage}{english}
 \begin{abstract}
-This paper presents the design and implementation of an acoustic radar system for object detection and distance estimation using continuous acoustic signal processing. The system employs a acoustic transmitter, a microphone receiver, and a microcontroller for signal digitization and processing. Fast Fourier Transform (FFT) algorithms and cross-correlation techniques are applied to calculate the Time-of-Flight (ToF) of the reflected acoustic signals. Experimental results demonstrate the performance of FFT-based correlation compared to direct time-domain implementation, validating its effectiveness in noisy environments.
+Este documento presenta la fundamentación teórica, implementación y análisis experimental de la Transformada Discreta de Fourier (DFT) y la Transformada Rápida de Fourier (FFT) aplicadas al procesamiento de señales acústicas, abarcando las etapas iniciales de un proyecto de radar acústico. Los algoritmos fueron modelados en Python siguiendo la formulación de Cooley-Tukey de decimación en el tiempo radix-2. Una comparación cuantitativa confirma la reducción de complejidad computacional de $\mathcal{O}(N^2)$ en la DFT a $\mathcal{O}(N \log_2 N)$ en la FFT. Además, se analizan las características de magnitud y fase de señales compuestas. Los resultados demuestran la viabilidad y necesidad de la descomposición espectral basada en FFT para la estimación de retardo en tiempo real en sistemas empotrados.
 \end{abstract}
 
 \begin{IEEEkeywords}
-Acoustic Radar, Fast Fourier Transform (FFT), Cross-Correlation, Time of Flight (ToF), Digital Signal Processing.
+Transformada Discreta de Fourier, Transformada Rápida de Fourier, Análisis Espectral, Complejidad Algorítmica, Procesamiento de Señales.
 \end{IEEEkeywords}
-\end{otherlanguage}
 
-% --- INTRODUCCIÓN ---
 \section{Introducción}
-\selectlanguage{spanish}
-En el campo del procesamiento digital de señales, la estimación de distancia mediante ondas acústicas representa una aplicación práctica de los sistemas lineales e invariantes en el tiempo (LTI)~\cite{oppenheim2009}. Este proyecto abarca la concepción, simulación e implementación de un radar acústico capable de calcular el tiempo de vuelo ($\text{ToF}$) de una señal conocida tras reflejarse en un objeto.
+El diseño de un sistema de radar acústico requiere la estimación precisa del tiempo de vuelo ($\tau$) del eco reflejado por un objeto para determinar su distancia física. Para lograr una detección robusta ante la contaminación por ruido e interferencias ambientales, la descomposición espectral constituye la base fundamental del procesamiento digital de señales.
 
-La organización del presente documento se estructura de la siguiente manera: La Sección~\ref{sec:marco_teorico} presenta la revisión bibliográfica sobre transformación de Fourier y correlación. La Sección~\ref{sec:resultados} detalla los experimentos en simulación y los resultados en hardware. Finalmente, las Secciones~\ref{sec:conclusiones} y~\ref{sec:recomendaciones} presentan las conclusiones y recomendaciones.
+En este proyecto individual, se evalúan la fundamentación matemática, la implementación algorítmica y el rendimiento computacional de la DFT directa frente al algoritmo FFT Radix-2. Asimismo, se analiza la representación en magnitud y fase de diversas señales para validar la exactitud de la transformación espectral previo a su despliegue en hardware empotrado.
 
-% --- MARCO TEÓRICO ---
-\section{Marco Teórico y Revisión Bibliográfica}
-\label{sec:marco_teorico}
-\selectlanguage{spanish}
-El cálculo del tiempo de retardo entre una señal transmitida $x(t)$ y una señal recibida $y(t)$ se fundamenta en la correlación cruzada $R_{xy}(\tau)$, definida formalmente como:
-\begin{equation}
-R_{xy}(\tau) = \int_{-\infty}^{\infty} x(t) y(t + \tau) \, dt
-\end{equation}
+\section{Etapa 1: Investigación y Marco Teórico}
 
-A través del teorema de convolución, la correlación en el dominio del tiempo equivale a una multiplicación en el dominio de la frecuencia:
-\begin{equation}
-\mathcal{F}\{R_{xy}(\tau)\} = X^*(f) \cdot Y(f)
-\end{equation}
-donde $X^*(f)$ denota el complejo conjugado de la Transformada de Fourier de la señal emitida.
+\subsection{Variable Compleja y Autofunciones en Sistemas LTI} 
+El análisis de señales en el dominio complejo constituye la herramienta matemática fundamental para caracterizar Sistemas Lineales e Invariantes en el Tiempo (LTI) \cite{oppenheim1997}. Una propiedad crucial de los sistemas LTI es que las exponenciales complejas de la forma $z^n$ (en tiempo discreto) o $e^{st}$ (en tiempo continuo) actúan como \textit{autofunciones} (\textit{eigenfunctions}) del sistema \cite{oppenheim1997}. Al aplicar una entrada exponencial compleja $x[n] = z^n$, la salida $y[n]$ resulta ser la misma exponencial multiplicada por un factor de escala complejo $H(z)$, denominado autovalor o respuesta en frecuencia \cite{oppenheim1997}: 
+\begin{equation} 
+y[n] = H(z) z^n, \quad \text{donde } H(z) = \sum_{k=-\infty}^{\infty} h[k] z^{-k} 
+\end{equation} 
+Esta propiedad permite descomponer señales complejas en sumas de exponenciales complejas mediante la identidad de Euler ($e^{j\omega n} = \cos(\omega n) + j\sin(\omega n)$), transformando ecuaciones diferenciales y de diferencias complejas en operaciones algebraicas simples \cite{oppenheim1997}. 
 
-% --- RESULTADOS Y ANÁLISIS ---
-\section{Resultados y Análisis de Resultados}
-\label{sec:resultados}
-\selectlanguage{spanish}
+\subsection{Sistemas LTI, Convolución y Ortogonalidad} 
+Cualquier señal discreta $x[n]$ puede representarse como una combinación lineal de impulsos unitarios desplazados $\delta[n-k]$ ponderados por el valor de la señal $x[k]$, propiedad conocida como la \textit{propiedad de desplazamiento} (\textit{sifting property}) \cite{oppenheim1997}. Por el principio de superposición e invariancia en el tiempo, la respuesta de un sistema LTI ante cualquier entrada $x[n]$ se obtiene mediante la suma de convolución con su respuesta al impulso $h[n]$ \cite{oppenheim1997}: 
+\begin{equation} 
+y[n] = x[n] * h[n] = \sum_{k=-\infty}^{\infty} x[k] \, h[n-k] 
+\end{equation} 
+En el análisis espectral, la ortogonalidad entre funciones exponenciales armónicamente relacionadas ($\sum_{n=\langle N \rangle} e^{j k \frac{2\pi}{N} n} e^{-j m \frac{2\pi}{N} n} = N \delta[k-m]$) garantiza que la descomposición de una señal en sus componentes frecuenciales sea única y sin interferencias entre armónicos \cite{oppenheim1997}. 
 
-\subsection{Experimentos con FFT y DFT}
-Se comparó el desempeño computacional entre la DFT directa $O(N^2)$ y el algoritmo FFT Radix-2 $O(N \log N)$. La Fig.~\ref{fig:tiempos} ilustra la diferencia en tiempo de ejecución para distintos tamaños de muestra $N$.
+\subsection{Transformada Discreta de Fourier (DFT) y Algoritmo FFT} 
+Para secuencias discretas de duración finita $N$, la Transformada Discreta de Fourier (DFT) mapea $N$ muestras del dominio del tiempo a $N$ muestras equiespaciadas en el dominio de la frecuencia \cite{oppenheim1997}: 
+\begin{equation} 
+X[k] = \sum_{n=0}^{N-1} x[n] \, e^{-j \frac{2\pi}{N} k n}, \quad k = 0, 1, \dots, N-1 \label{eq:dft_frame} 
+\end{equation} 
+El cálculo directo de la Ecuación \eqref{eq:dft_frame} requiere $N^2$ multiplicaciones complejas \cite{cooley1965, oppenheim1997}. Para superar esta limitación computacional en sistemas en tiempo real, Cooley y Tukey popularizaron el algoritmo de la Transformada Rápida de Fourier (FFT) por decimación en el tiempo \cite{cooley1965}. Al dividir recursivamente una DFT de tamaño $N$ en dos DFTs de tamaño $N/2$ (aprovechando la simetría de los factores de giro $W_N^k$), la complejidad se reduce a $\mathcal{O}(N \log_2 N)$ \cite{cooley1965, oppenheim1997}. 
+
+\subsection{Correlación Cruzada y Estimación del Tiempo de Vuelo (ToF)} 
+En sistemas de radar acústico monostáticos, la distancia física $d$ a un objeto se determina a partir del tiempo de vuelo ($\tau$) del eco refleja mediante la relación $d = \frac{v_s \tau}{2}$, donde $v_s$ representa la velocidad del sonido en el medio. Para identificar el retardo $\tau$ en señales contaminadas con ruido y reflexiones, se utiliza la correlación cruzada $\phi_{xy}[m]$ entre la señal transmitida $x[n]$ y la señal recibida $y[n]$ \cite{oppenheim1997}: 
+\begin{equation} 
+\phi_{xy}[m] = \sum_{n=-\infty}^{\infty} x[n] \, y[n+m] 
+\end{equation} 
+El valor de desfase $m = \tau$ donde la correlación cruzada alcanza su máximo absoluto indica la coincidencia óptima del eco \cite{oppenheim1997}. Aprovechando el Teorema de Convolución, la correlación puede calcularse eficientemente en el dominio de la frecuencia mediante la FFT como $\phi_{xy}[m] = \mathcal{F}^{-1}\{ X^*[k] \cdot Y[k] \}$, reduciendo drásticamente la latencia del cálculo en el microcontrolador \cite{oppenheim1997}.
+
+\section{Etapa 2: Metodología e Implementación Algorítmica}
+
+\subsection{Pseudocódigo de la DFT Directa}
+El Algoritmo \ref{alg:dft} describe la evaluación matricial de la DFT mediante la construcción de la matriz exponencial compleja.
+
+\begin{algorithm}[H]
+\caption{Transformada Discreta de Fourier Directa (DFT)}
+\label{alg:dft}
+\begin{algorithmic}[1]
+\REQUIRE Vector de entrada $x$ de longitud $N$
+\ENSURE Vector complejo $X$ de longitud $N$
+\STATE Crear vector de índices $n \leftarrow [0, 1, \dots, N-1]$
+\STATE Crear vector de índices $k \leftarrow n^T$
+\STATE Calcular matriz de exponentes $E \leftarrow \exp\left(-2j \cdot \pi \cdot k \cdot n / N\right)$
+\STATE $X \leftarrow E \cdot x$ \COMMENT{Producto punto matricial}
+\RETURN $X$
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Pseudocódigo de la FFT Recursiva (Cooley-Tukey)}
+El Algoritmo \ref{alg:fft} implementa la descomposición recursiva por decimación en el tiempo, asumiendo $N = 2^m$.
+
+\begin{algorithm}[H]
+\caption{Transformada Rápida de Fourier (FFT Radix-2)}
+\label{alg:fft}
+\begin{algorithmic}[1]
+\REQUIRE Vector de entrada $x$ de longitud $N$
+\ENSURE Vector complejo $X$ de longitud $N$
+\IF{$N \le 1$}
+    \RETURN $x$
+\ENDIF
+\STATE $x_{\text{pares}} \leftarrow [x[0], x[2], \dots, x[N-2]]$
+\STATE $x_{\text{impares}} \leftarrow [x[1], x[3], \dots, x[N-1]]$
+\STATE $F \leftarrow \text{FFT\_Manual}(x_{\text{pares}})$
+\STATE $G \leftarrow \text{FFT\_Manual}(x_{\text{impares}})$
+\STATE $W \leftarrow \exp\left(-2j \cdot \pi \cdot [0, 1, \dots, \frac{N}{2}-1] / N\right)$
+\STATE $X_{\text{izq}} \leftarrow F + W \odot G$
+\STATE $X_{\text{der}} \leftarrow F - W \odot G$
+\RETURN Concatenar($X_{\text{izq}}, X_{\text{der}}$)
+\end{algorithmic}
+\end{algorithm}
+
+\section{Etapa 2: Resultados y Análisis Espectral}
+
+\subsection{Comparación de Tiempos de Ejecución}
+Se evaluaron los tiempos de procesamiento de la DFT directa y la FFT recursiva para tamaños de muestra $N \in \{2^4, 2^5, \dots, 2^{10}\}$. 
 
 \begin{figure}[htbp]
-    \centering
-    %\includegraphics[width=0.45\textwidth]{etapa2_tiempos_dft_fft.png}
-    \caption{Comparación de tiempos de ejecución entre DFT y FFT.}
-    \label{fig:tiempos}
+\centering
+\includegraphics[width=0.85\linewidth]{imagenes/etapa2_tiempos_dft_fft.png}
+\caption{Comparación de tiempo de ejecución (escala log-log) entre DFT ($\mathcal{O}(N^2)$) y FFT ($\mathcal{O}(N \log_2 N)$).}
+\label{fig:tiempos}
 \end{figure}
 
-\subsection{Detección de Ecos y Correlación}
-Mediante el uso de impulsos tipo \textit{Chirp}, se identificó el retardo del eco en presencia de ruido blanco aditivo (AWGN). La distancia $d$ se determinó mediante:
-\begin{equation}
-d = \frac{v_s \cdot \text{ToF}}{2}
-\end{equation}
-donde $v_s \approx 343 \text{ m/s}$ representa la velocidad del sonido en el aire a temperatura ambiente.
+Como se observa en la Figura \ref{fig:tiempos}, para valores pequeños ($N \le 32$), el costo de la recursión en la FFT iguala el tiempo computacional de la DFT. Sin embargo, a medida que $N$ aumenta ($N \ge 128$), la curva de la DFT crece exponencialmente (en la gráfica logarítmica) mientras que la FFT mantiene una pendiente significativamente menor, validando la predicción teórica de $\mathcal{O}(N \log_2 N)$.
 
-% --- CONCLUSIONES ---
-\section{Conclusiones}
-\label{sec:conclusiones}
-\selectlanguage{spanish}
-La implementación de la correlación cruzada en el dominio de la frecuencia mediante la FFT redujo significativamente el costo computacional en comparación con la implementación directa en el tiempo. La utilización de señales moduladas en frecuencia (chirp) demostró una mayor robustez frente al ruido ambiental en la detección del tiempo de vuelo.
+\subsection{Espectro de Suma de Senoides}
+Se procesó una señal temporal sintética compuesta por dos tonos de $100\text{ Hz}$ ($A_1 = 1.0$) y $300\text{ Hz}$ ($A_2 = 0.5$) con $F_s = 2048\text{ Hz}$.
 
-% --- RECOMENDACIONES ---
-\section{Recomendaciones}
-\label{sec:recomendaciones}
-\selectlanguage{spanish}
-Se recomienda acondicionar analógicamente la señal del micrófono mediante un filtro pasa-banda antes del proceso de digitalización con el ADC para evitar el solapamiento de frecuencias y reducir interferencias de baja frecuencia.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.9\linewidth]{imagenes/etapa2_senos.png}
+\caption{Análisis temporal, espectro de magnitud y fase para señal de $100\text{ Hz} + 300\text{ Hz}$.}
+\label{fig:senos}
+\end{figure}
 
-% --- BIBLIOGRAFÍA ---
+La Figura \ref{fig:senos} muestra picos discretos bien definidos exactamente en $100\text{ Hz}$ y $300\text{ Hz}$. La aplicación de un umbral para silenciar el ruido de fase permite observar claramente la alineación temporal de las componentes armónicas activas.
+
+\subsection{Espectro de una Onda Cuadrada}
+Se analizó una onda cuadrada de $50\text{ Hz}$ bajo las mismas condiciones de muestreo.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.9\linewidth]{imagenes/etapa2_cuadrada.png}
+\caption{Análisis temporal y espectral (magnitud y fase) de una onda cuadrada de $50\text{ Hz}$.}
+\label{fig:cuadrada}
+\end{figure}
+
+En la Figura \ref{fig:cuadrada}, el espectro refleja la presencia exclusiva de armónicos impares ($50\text{ Hz}, 150\text{ Hz}, \dots$), cuyas amplitudes decaen de forma inversamente proporcional ($1/k$), coincidiendo con la teoría de las Series de Fourier.
+
+\section{Etapa 3: Detección de Ecos y Correlación Cruzada}
+\textit{Nota: Esta sección se desarrollará e implementará en la siguiente etapa del proyecto, enfocándose en estimar el parámetro $\tau$ utilizando operaciones de correlación rápida basadas en la FFT.}
+
+\section{Conclusiones y Recomendaciones}
+La implementación algorítmica demuestra experimentalmente la drástica reducción de complejidad computacional lograda por la FFT. Esta reducción de $\mathcal{O}(N^2)$ a $\mathcal{O}(N \log_2 N)$ resulta indispensable para garantizar que el sistema empotrado del radar acústico ejecute la estimación de retardo en tiempo real sin saturar los recursos de procesamiento.
+
+Se recomienda implementar ventanas de encuadramiento (ej. Hamming) previo al cálculo de la FFT en las señales capturadas del radar para mitigar los efectos de fuga espectral. Asimismo, para la Etapa 3, se sugiere estructurar la correlación cruzada en el dominio de la frecuencia aprovechando el teorema de convolución rápida.
+
 \bibliographystyle{IEEEtran}
 \bibliography{referencias}
 
