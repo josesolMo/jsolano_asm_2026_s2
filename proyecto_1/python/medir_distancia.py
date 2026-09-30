@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 # =============================================================================
 # CONFIGURACIÓN DE PARÁMETROS
 # =============================================================================
-# ¡IMPORTANTE! Cambia 'COM3' al puerto donde esté conectado tu Arduino
 PUERTO_SERIAL = 'COM3'
 BAUD_RATE = 115200
 
@@ -26,7 +25,7 @@ lag_minimo_eco = 105
 print(f"Conectando a {PUERTO_SERIAL} a {BAUD_RATE} baudios...")
 try:
     ser = serial.Serial(PUERTO_SERIAL, BAUD_RATE, timeout=2)
-    time.sleep(2)  # Espera para que el Arduino se reinicie tras abrir el puerto
+    time.sleep(2)
 except Exception as e:
     print(f"Error al abrir el puerto serial: {e}")
     print("Verifica que el Arduino esté conectado y el puerto sea el correcto.")
@@ -57,8 +56,7 @@ print(f"Se capturaron {len(lecturas)} muestras exitosamente.")
 # Convertimos la lista de lecturas a un arreglo de NumPy
 y = np.array(lecturas)
 
-# --- CORRECCIÓN DE NIVEL DC (CRUCIAL PARA EL MICRÓFONO MAX4466) ---
-# El MAX4466 entrega una señal centrada en ~2.5V (alrededor de 512 en el ADC).
+# --- CORRECCIÓN DE NIVEL DC ---
 # Restamos la media de la señal para centrar todo el ruido y las ondas en 0.
 y = y - np.mean(y)
 
@@ -107,7 +105,7 @@ plt.figure(figsize=(10, 8))
 # Subtrama 1: Señal Cruda (Centrada)
 plt.subplot(2, 1, 1)
 plt.plot(y, label="Señal Recibida y[n]", color="tab:blue")
-plt.title("Señal Capturada por Micrófono MAX4466 (A0 - DC Removido)")
+plt.title("Señal Capturada por Micrófono MAX4466")
 plt.xlabel("Muestra")
 plt.ylabel("Amplitud ADC (Centrada en 0)")
 plt.axvline(x=lag_minimo_eco, color='orange', linestyle=':', label="Fin de Ráfaga Directa")

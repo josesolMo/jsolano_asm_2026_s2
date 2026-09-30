@@ -3,7 +3,7 @@ const int PIN_MIC = A0;
 
 const int NUM_MUESTRAS = 600;      // 60 ms de grabación total a 10 kHz
 const int FREC_TONO = 2000;
-const unsigned long PERIODO_US = 100;
+const unsigned long PERIODO_US = 500;
 const unsigned long DURACION_PULSO_US = 10000; // 10 ms de tono para resonancia real
 
 uint16_t muestras[NUM_MUESTRAS];
