@@ -10,7 +10,7 @@ PUERTO_SERIAL = 'COM3'
 BAUD_RATE = 115200
 
 Fs = 10000.0                       # Frecuencia de muestreo (10 kHz)
-VELOCIDAD_SONIDO_CM_S = 34300.0    # Velocidad del sonido en cm/s a 20°C
+VELOCIDAD_SONIDO_CM_S = 3430.0    # Velocidad del sonido en cm/s a 20°C
 NUM_MUESTRAS = 600                 # Cantidad de muestras (60 ms totales)
 f_tono = 2000.0                    # Frecuencia del emisor piezoeléctrico (2 kHz)
 duracion_pulso_s = 0.010           # Duración de la ráfaga (10 ms)
@@ -69,8 +69,6 @@ x_patron = np.sin(2 * np.pi * f_tono * t_x) * np.hanning(N_x)
 # Aplicación de correlación cruzada completa (full)
 correlacion = np.correlate(y, x_patron, mode='full')
 
-# Creación del eje de retardos (lags). En mode='full', el desfase cero
-# ocurre en el índice equivalente a la longitud del patrón menos 1.
 lags = np.arange(-N_x + 1, len(y))
 
 # Para buscar el eco físico, solo nos interesan los retardos positivos (m >= 0).
