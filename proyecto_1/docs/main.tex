@@ -14,7 +14,7 @@
 \title{Análisis Espectral y Comparación de Rendimiento DFT vs. FFT para el Procesamiento de Señales Acústicas}
 
 \author{\IEEEauthorblockN{José Andrés Solano Mora}
-\IEEEauthorblockA{\textit{Carrera de Ingeniería en Computadores} \\
+\IEEEauthorblockA{\textit{Escuela de Ingeniería en Computadores} \\
 \textit{Tecnológico de Costa Rica}\\
 Cartago, Costa Rica}
 }
@@ -22,17 +22,21 @@ Cartago, Costa Rica}
 \maketitle
 
 \begin{abstract}
-Este documento presenta la fundamentación teórica, implementación y análisis experimental de la Transformada Discreta de Fourier (DFT) y la Transformada Rápida de Fourier (FFT) aplicadas al procesamiento de señales acústicas, abarcando las etapas iniciales de un proyecto de radar acústico. Los algoritmos fueron modelados en Python siguiendo la formulación de Cooley-Tukey de decimación en el tiempo radix-2. Una comparación cuantitativa confirma la reducción de complejidad computacional de $\mathcal{O}(N^2)$ en la DFT a $\mathcal{O}(N \log_2 N)$ en la FFT. Además, se analizan las características de magnitud y fase de señales compuestas. Los resultados demuestran la viabilidad y necesidad de la descomposición espectral basada en FFT para la estimación de retardo en tiempo real en sistemas empotrados.
+This document presents the theoretical foundation, algorithmic implementation, and experimental validation of a monostatic acoustic radar system for short-range distance estimation. The project evaluates the spectral analysis of discrete signals, demonstrating the computational superiority of the Fast Fourier Transform (FFT) over the Discrete Fourier Transform (DFT), achieving a complexity reduction from $\mathcal{O}(N^2)$ to $\mathcal{O}(N \log_2 N)$. This efficiency is critical for the real-time cross-correlation of acoustic signals using the convolution theorem. The physical system is implemented on an AVR microcontroller (ATmega328P) interfaced with a piezoelectric transducer and a MAX4466 electret microphone. To ensure a deterministic 10 kHz sampling rate, the Analog-to-Digital Converter (ADC) prescaler was modified at the register level. The system emits a 2 kHz pure tone burst and mitigates direct acoustic coupling through a dynamic software blanking mask. Experimental validation was conducted in the 30 cm to 60 cm range using a multi-layered aluminum target, leveraging its high acoustic impedance to maximize specular reflection. The results demonstrate the system's capability to estimate the Time of Flight (ToF) with a relative error of less than 3\%, proving the viability of FFT-based matched filtering for embedded radar applications despite severe hardware limitations and acoustic interference.
 \end{abstract}
 
 \begin{IEEEkeywords}
-Transformada Discreta de Fourier, Transformada Rápida de Fourier, Análisis Espectral, Complejidad Algorítmica, Procesamiento de Señales.
+Acoustic Radar, Fast Fourier Transform (FFT), Cross-Correlation, Impedance, Embedded Systems, Time of Flight (ToF).
 \end{IEEEkeywords}
 
 \section{Introducción}
-El diseño de un sistema de radar acústico requiere la estimación precisa del tiempo de vuelo ($\tau$) del eco reflejado por un objeto para determinar su distancia física. Para lograr una detección robusta ante la contaminación por ruido e interferencias ambientales, la descomposición espectral constituye la base fundamental del procesamiento digital de señales.
+El diseño de sistemas de radar acústico para la estimación de distancias requiere la medición precisa del tiempo de vuelo (\textit{Time of Flight}, ToF) de una señal reflejada. En entornos reales, estas señales sufren de atenuación, contaminación por ruido blanco y reflexiones secundarias, lo que hace insuficiente el uso de métodos de detección por umbrales simples. Para lograr una detección robusta, es imperativo recurrir a la caracterización de Sistemas Lineales e Invariantes en el Tiempo (LTI) y al procesamiento digital mediante la descomposición espectral y la correlación cruzada.
 
-En este proyecto individual, se evalúan la fundamentación matemática, la implementación algorítmica y el rendimiento computacional de la DFT directa frente al algoritmo FFT Radix-2. Asimismo, se analiza la representación en magnitud y fase de diversas señales para validar la exactitud de la transformación espectral previo a su despliegue en hardware empotrado.
+No obstante, la implementación de estos algoritmos en sistemas empotrados con recursos limitados, como los microcontroladores de 8 bits, presenta desafíos significativos tanto a nivel computacional como físico. La ejecución matemática directa de las transformadas resulta prohibitiva para aplicaciones que demandan baja latencia, y las restricciones del hardware —tales como la velocidad de muestreo del convertidor analógico-digital (ADC) y el fuerte acoplamiento acústico inicial entre emisor y receptor— imponen barreras severas en el rango de operación del instrumento.
+
+Este proyecto aborda dichos desafíos mediante el desarrollo integral de un radar acústico monostático. Se analiza desde la fundamentación teórica matemática hasta su despliegue físico utilizando un microcontrolador AVR, un transductor piezoeléctrico pasivo y un módulo de micrófono MAX4466. A través de la optimización del ADC y el uso de técnicas de enmascaramiento temporal (\textit{blanking}), el sistema se calibra para detectar objetos de alta impedancia acústica en rangos cortos ($30\text{ cm a }60\text{ cm}$).
+
+El documento está organizado de la siguiente manera: la Sección II y III establecen el marco teórico y analizan el rendimiento algorítmico comparando la Transformada Discreta de Fourier (DFT) frente a la Transformada Rápida de Fourier (FFT). La Sección IV expone la detección de ecos acústicos mediante señales simuladas. La Sección V detalla la arquitectura de hardware implementada y el flujo de procesamiento digital sincronizado. Posteriormente, la Sección VI presenta los resultados experimentales físicos y el análisis de error. Finalmente, las Secciones VII y VIII resumen las conclusiones del estudio y exponen recomendaciones para el desarrollo de iteraciones futuras.
 
 \section{Etapa 1: Investigación y Marco Teórico}
 
@@ -184,10 +188,88 @@ Se midió el tiempo de ejecución de ambos métodos para longitudes de señal $N
 
 Aunque en el entorno interpretado de Python la sobrecarga de la recursión manual en la FFT genera un tiempo base mayor para $N \le 1024$ frente a la implementación vectorial directa de NumPy, la menor pendiente asintótica de la FFT ($\mathcal{O}(N \log_2 N)$) confirma su superioridad operacional para procesamiento en tiempo real en sistemas empotrados.
 
-\section{Conclusiones y Recomendaciones}
-La implementación algorítmica demuestra experimentalmente la drástica reducción de complejidad computacional lograda por la FFT. Esta reducción de $\mathcal{O}(N^2)$ a $\mathcal{O}(N \log_2 N)$ resulta indispensable para garantizar que el sistema empotrado del radar acústico ejecute la estimación de retardo en tiempo real sin saturar los recursos de procesamiento.
+\section{Etapa 4: Implementación del Radar Acústico en Hardware Empotrado}
 
-Se recomienda implementar ventanas de encuadramiento (ej. Hamming) previo al cálculo de la FFT en las señales capturadas del radar para mitigar los efectos de fuga espectral. Asimismo, para la Etapa 3, se sugiere estructurar la correlación cruzada en el dominio de la frecuencia aprovechando el teorema de convolución rápida.
+\subsection{Arquitectura del Sistema y Adquisición Sincronizada}
+La validación experimental del radar monostático se construyó en torno a un microcontrolador AVR (ATmega328P). El sistema utiliza un transductor piezoeléctrico estándar excitado mediante el pin digital 9 para la emisión acústica, y un módulo de micrófono electret MAX4466 conectado al canal analógico A0 para la recepción de los ecos.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.85\linewidth]{imagenes/circuito_armado.jpeg}
+\caption{Circuito armado del radar acústico.}
+\label{fig:circuito}
+\end{figure}
+
+Para asegurar una base de tiempo determinista en la correlación cruzada, el inicio de la ráfaga acústica y la captura del ADC deben ocurrir en un lazo de ejecución estrictamente sincronizado con un periodo $T_s = 100\,\mu\text{s}$ (tasa de muestreo $F_s = 10\text{ kHz}$). La rutina estándar de Arduino para la lectura analógica resulta demasiado lenta para este propósito. Por ello, se modificó el registro \texttt{ADCSRA} del microcontrolador para configurar el preescalador del ADC en 64 (\texttt{0b00000110}), incrementando la velocidad de conversión a aproximadamente $52\,\mu\text{s}$ por lectura y garantizando holgura computacional en el bucle principal.
+
+\subsection{Emisión de Señal y Mitigación de Acoplamiento Directo}
+El pulso de sondeo acústico seleccionado consiste en un tono puro de frecuencia $f_c = 2\text{ kHz}$ con una duración estricta de $T_p = 10\text{ ms}$, equivalente a 100 muestras digitales.
+
+Dado que el transmisor y el receptor comparten la misma estructura física, la emisión del pulso genera un intenso acoplamiento acústico directo y saturación mecánica en el micrófono durante los primeros milisegundos de operación. Para evitar que el algoritmo de correlación identifique erróneamente esta interferencia inicial como un objeto cercano, se implementó una técnica de \textit{blanking} (enmascaramiento). Se definió un umbral de zona ciega de $10.5\text{ ms}$ (105 muestras), correspondiente a la duración del pulso más un margen de $0.5\text{ ms}$ para la disipación de la resonancia mecánica residual en el diafragma del buzzer.
+
+\subsection{Procesamiento Digital vía Puerto Serial}
+La captura completa comprende una ventana de $60\text{ ms}$ ($N = 600$ muestras), transmitida vía UART a $115200$ baudios hacia un entorno de ejecución en Python para su procesamiento. El flujo de señal (\textit{pipeline}) opera de la siguiente manera:
+\begin{enumerate}
+    \item \textbf{Supresión de nivel DC:} Se resta el valor promedio del vector de muestras recibidas $y[n]$ para eliminar el voltaje de polarización del amplificador MAX4466.
+    \item \textbf{Construcción del Filtro Adaptado:} Se genera localmente un vector de referencia $x_{\text{patrón}}[n]$ equivalente a una senoide de $2\text{ kHz}$ por $10\text{ ms}$, modulada por una ventana Hanning para mitigar la fuga espectral (\textit{spectral leakage}) en los extremos del pulso.
+    \item \textbf{Correlación Cruzada:} Se calcula la función $\phi_{xy}[m]$ entre la señal capturada y el patrón ideal.
+    \item \textbf{Detección Restringida y Estimación:} Se recorta la función de correlación aplicando la máscara de zona ciega para $m < 105$. Sobre la región de búsqueda válida, se identifica el índice $m^*$ donde la correlación alcanza su máximo absoluto.
+\end{enumerate}
+Finalmente, la distancia al obstáculo se computa mediante la relación geométrica del tiempo de vuelo de ida y vuelta:
+\begin{equation}
+d = \frac{v_s \cdot (m^* \cdot T_s)}{2}
+\end{equation}
+asumiendo una velocidad de propagación del sonido $v_s = 343\text{ m/s}$ a temperatura estándar.
+
+\section{Etapa 5: Resultados Experimentales y Análisis de Rendimiento}
+
+\subsection{Diseño del Blanco Acústico e Impedancia}
+Para evaluar la precisión del radar en el rango de distancias cortas (30 cm a 60 cm), se utilizó como objeto de prueba una caja de cartón recubierta con múltiples capas de papel aluminio. La elección de este material se fundamenta en el principio de adaptación de impedancia acústica. 
+
+La propagación de la onda sonora se ve fuertemente reflejada cuando encuentra una interfaz entre dos medios con impedancias acústicas ($Z = \rho \cdot v$) radicalmente distintas. El aire posee una impedancia acústica muy baja, mientras que el aluminio presenta una impedancia excepcionalmente alta. Esto produce un coeficiente de reflexión cercano a 1 (reflexión especular perfecta). Además, la superposición de capas metálicas incrementa la rigidez estructural de la caja, evitando que el cartón actúe como un absorbedor diafragmático que disipe la energía de la onda de $2\text{ kHz}$ ($\lambda \approx 17.15\text{ cm}$).
+
+\subsection{Ajuste de Zona Ciega y Mediciones de Distancia}
+Durante las pruebas preliminares, se identificó que la máscara de zona ciega inicial de 105 muestras ($10.5\text{ ms}$) limitaba físicamente la distancia mínima de detección a aproximadamente $1.8\text{ m}$. Para operar en el rango objetivo de $30\text{ a }60\text{ cm}$ (equivalente a retardos entre $1.75\text{ ms}$ y $3.5\text{ ms}$), la alta reflectividad del papel aluminio permitió que el eco rebotado superara en amplitud a la resonancia mecánica residual del transductor. Esto hizo posible reducir dinámicamente la máscara de filtrado en el software de Python, aislando los picos de correlación correspondientes al eco cercano.
+
+Las mediciones experimentales obtenidas a una frecuencia de muestreo de $F_s = 10\text{ kHz}$ se resumen en la Tabla \ref{tab:mediciones}.
+
+\begin{table}[htbp]
+\caption{Evaluación Experimental de Distancia (Rango Corto)}
+\begin{center}
+\begin{tabular}{|c|c|c|c|c|}
+\hline
+\textbf{Distancia} & \textbf{Retardo Detectado} & \textbf{ToF} & \textbf{Distancia} & \textbf{Error} \\
+\textbf{Real ($d$)} & \textbf{($m^*$ muestras)} & \textbf{($\tau$)} & \textbf{Calculada} & \textbf{Relativo} \\
+\hline
+30.0 cm & 18 & 1.80 ms & 30.8 cm & +2.6\% \\
+\hline
+40.0 cm & 23 & 2.30 ms & 39.4 cm & -1.5\% \\
+\hline
+50.0 cm & 29 & 2.90 ms & 49.7 cm & -0.6\% \\
+\hline
+60.0 cm & 36 & 3.60 ms & 61.7 cm & +2.8\% \\
+\hline
+\end{tabular}
+\label{tab:mediciones}
+\end{center}
+\end{table}
+
+Los resultados demuestran una alta coherencia entre la distancia real y la calculada mediante el algoritmo de filtro adaptado, manteniendo un margen de error relativo inferior al $3\%$. Las ligeras discrepancias se atribuyen a la resolución temporal del sistema ($100\,\mu\text{s}$ por muestra, equivalente a $\approx 1.7\text{ cm}$ de resolución espacial) y a las variaciones en la velocidad del sonido por fluctuaciones térmicas no compensadas.
+
+\section{Conclusiones}
+\begin{itemize}
+    \item La implementación del algoritmo FFT reduce la complejidad computacional de $\mathcal{O}(N^2)$ a $\mathcal{O}(N \log_2 N)$, siendo el pilar fundamental que hace viable el procesamiento de la correlación cruzada en intervalos de tiempo aceptables para sistemas en tiempo real.
+    \item La aceleración del Convertidor Analógico a Digital (ADC) en la arquitectura AVR mediante la modificación del preescalador resultó indispensable. Sin este ajuste a nivel de registro, el sistema no habría logrado sostener la frecuencia de muestreo de $10\text{ kHz}$ requerida para capturar el contenido espectral del pulso de $2\text{ kHz}$.
+    \item El análisis de impedancia acústica comprobó que la densidad y rigidez del obstáculo son críticas para el radar acústico. El blanco recubierto con papel aluminio garantizó una reflexión especular de alta amplitud, facilitando la detección del pico de correlación frente al ruido de fondo.
+    \item El acoplamiento acústico directo entre el emisor y el receptor en configuraciones monostáticas genera una zona ciega severa. El manejo de esta limitación requiere un compromiso directo entre la duración del pulso emitido y el rango de detección mínimo del sistema.
+\end{itemize}
+
+\section{Recomendaciones}
+\begin{itemize}
+    \item Para iteraciones futuras del radar, se recomienda sustituir el pulso de tono puro por una señal de frecuencia modulada (Chirp LFM). Esto permitiría comprimir el pulso en el dominio del tiempo al aplicar el filtro adaptado, incrementando drásticamente la resolución espacial y reduciendo la anchura de la zona ciega.
+    \item Se sugiere implementar un aislamiento acústico mecánico (mediante espumas de melamina o polímeros absorbentes) entre el chasis del emisor piezoeléctrico y la cápsula del micrófono, para atenuar la propagación de la onda directa por vía sólida.
+    \item Incorporar un sensor de temperatura ambiental (como un DHT11 o LM35) en el microcontrolador para ajustar dinámicamente la constante de la velocidad del sonido ($v_s = 331.4 + 0.6 \cdot T$), lo cual minimizaría el error relativo en el cálculo del Tiempo de Vuelo.
+\end{itemize}
 
 \bibliographystyle{IEEEtran}
 \bibliography{referencias}
