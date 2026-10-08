@@ -1,0 +1,161 @@
+{
+  "grupo": "XX",
+  "seccion": "2.2",
+  "fs_Hz": 16000,
+  "duracion_s": 6.0,
+  "pico_maximo": 0.8,
+  "fade_ms": 20,
+  "tolerancia_snr_dB": 0.01,
+  "casos": {
+    "caso_1": {
+      "descripcion": "Multitono + interferencia sinusoidal separada de las componentes útiles",
+      "semilla": 20261101,
+      "fs_Hz": 16000,
+      "N": 96000,
+      "duracion_s": 6.0,
+      "tipo_senal": "multitono",
+      "frecuencias_utiles_Hz": [
+        440.0,
+        880.0,
+        1320.0
+      ],
+      "amplitudes_utiles": [
+        1.0,
+        0.55,
+        0.3
+      ],
+      "fases_grados": [
+        0.0,
+        35.0,
+        -50.0
+      ],
+      "banda_util_Hz": [
+        340.0,
+        1420.0
+      ],
+      "tipo_ruido": "tonal",
+      "detalle_ruido": "Sinusoide de 2500 Hz",
+      "frecuencia_interferencia_Hz": 2500.0,
+      "banda_ruido_Hz": null,
+      "snr_objetivo_dB": 5.0,
+      "snr_obtenida_dB": 5.000000000000011,
+      "snr_obtenida_wav_dB": 4.9998852202592845,
+      "ganancia_comun": 0.38284868216412726,
+      "archivos": {
+        "01_referencia_limpia.wav": {
+          "ruta": "pruebas/caso_1/01_referencia_limpia.wav",
+          "sha256": "2df8eecbdeca215641a9f08e077fb9309bf3601dd6a69ee09eaefed72d8ed5c3"
+        },
+        "02_ruido.wav": {
+          "ruta": "pruebas/caso_1/02_ruido.wav",
+          "sha256": "6010daa4ca144711c126e16130f5c98aa388dc6f69fb1e7312caaf9ce06fa892"
+        },
+        "03_entrada_contaminada.wav": {
+          "ruta": "pruebas/caso_1/03_entrada_contaminada.wav",
+          "sha256": "dbbafd77775bfe740c6761ec50548dcb485f998455b9bc069f82b0def848e9b7"
+        }
+      }
+    },
+    "caso_2": {
+      "descripcion": "Multitono + ruido blanco gaussiano",
+      "semilla": 20262202,
+      "fs_Hz": 16000,
+      "N": 96000,
+      "duracion_s": 6.0,
+      "tipo_senal": "multitono",
+      "frecuencias_utiles_Hz": [
+        440.0,
+        880.0,
+        1320.0
+      ],
+      "amplitudes_utiles": [
+        1.0,
+        0.55,
+        0.3
+      ],
+      "fases_grados": [
+        0.0,
+        35.0,
+        -50.0
+      ],
+      "banda_util_Hz": [
+        340.0,
+        1420.0
+      ],
+      "tipo_ruido": "blanco",
+      "detalle_ruido": "Blanco gaussiano, 0-8000 Hz",
+      "frecuencia_interferencia_Hz": null,
+      "banda_ruido_Hz": null,
+      "snr_objetivo_dB": 3.0,
+      "snr_obtenida_dB": 3.000000000000011,
+      "snr_obtenida_wav_dB": 2.9997858979458956,
+      "ganancia_comun": 0.2102247829249899,
+      "archivos": {
+        "01_referencia_limpia.wav": {
+          "ruta": "pruebas/caso_2/01_referencia_limpia.wav",
+          "sha256": "06a8faf01251e645acd3deaaad15b3e50d0d14328811f8448b2b35cca3d9875c"
+        },
+        "02_ruido.wav": {
+          "ruta": "pruebas/caso_2/02_ruido.wav",
+          "sha256": "99c46c820a3a7957672e3fdc1a9466bfe2a3d3c1bdff7c2bb275b80aed9f9965"
+        },
+        "03_entrada_contaminada.wav": {
+          "ruta": "pruebas/caso_2/03_entrada_contaminada.wav",
+          "sha256": "7ba6c6664ef4fb28fb2cc457bfff3ca0c0c921af1ad75bf5ae8fa6455ab93c31"
+        }
+      }
+    },
+    "caso_3": {
+      "descripcion": "Multitono + ruido de banda limitada que se superpone parcialmente con la banda útil",
+      "semilla": 20263303,
+      "fs_Hz": 16000,
+      "N": 96000,
+      "duracion_s": 6.0,
+      "tipo_senal": "multitono",
+      "frecuencias_utiles_Hz": [
+        440.0,
+        880.0,
+        1320.0
+      ],
+      "amplitudes_utiles": [
+        1.0,
+        0.55,
+        0.3
+      ],
+      "fases_grados": [
+        0.0,
+        35.0,
+        -50.0
+      ],
+      "banda_util_Hz": [
+        340.0,
+        1420.0
+      ],
+      "tipo_ruido": "banda",
+      "detalle_ruido": "Banda 1000-2200 Hz (solapa 1000-1420 Hz con la banda útil)",
+      "frecuencia_interferencia_Hz": null,
+      "banda_ruido_Hz": [
+        1000.0,
+        2200.0
+      ],
+      "snr_objetivo_dB": 0.0,
+      "snr_obtenida_dB": 2.1215204264172265e-14,
+      "snr_obtenida_wav_dB": -0.0003731079341408244,
+      "ganancia_comun": 0.16326182108444695,
+      "archivos": {
+        "01_referencia_limpia.wav": {
+          "ruta": "pruebas/caso_3/01_referencia_limpia.wav",
+          "sha256": "28e63416ccde8975d77df9728a9b8ec442cf4978d788cacfc8f89b6e68fc4ff0"
+        },
+        "02_ruido.wav": {
+          "ruta": "pruebas/caso_3/02_ruido.wav",
+          "sha256": "dd8bbb30ff6cba6322d89e097b11fd614f23ca9e6bd6730707b450e2f112f09a"
+        },
+        "03_entrada_contaminada.wav": {
+          "ruta": "pruebas/caso_3/03_entrada_contaminada.wav",
+          "sha256": "8bd2c002a13b63dc6b7ab859f55c7d8abf77ce8282ff49a320cf181837d3b7fb"
+        }
+      }
+    }
+  }
+}
