@@ -6,9 +6,13 @@ Cadena por bloque: ventana de análisis -> FFT -> ganancia G[k] -> IFFT
 
 import numpy as np
 from scipy.io import wavfile
+from scipy.ndimage import median_filter
 
 FS = 16000
 N_BLOQUE = 1024
+ALFA = 6.0          # Factor de sobresustracción: cuántas veces el ruido medio se resta.
+G_MIN = 0.05        # Ganancia mínima (-26 dB): deja un residuo en vez de huecos de silencio.
+ANCHO_MEDIANA = 31  # Bins de la mediana local (~484 Hz con N=1024 a 16 kHz).
 
 
 def leer_wav(ruta):
@@ -37,6 +41,47 @@ def ventana_raiz_hann(n):
 def ganancia_unitaria(espectro):
     """Ganancia neutra: no modifica ningún bin (sirve para probar la reconstrucción)."""
     return np.ones(len(espectro))
+
+
+def estimar_potencia_ruido(espectro, ancho=ANCHO_MEDIANA):
+    """Estima, bin por bin, la potencia media del ruido de un bloque.
+
+    Usa la mediana de |X|^2 en una vecindad de `ancho` bins alrededor de cada bin.
+    """
+    if ancho < 1 or ancho % 2 == 0:
+        raise ValueError('El ancho de la mediana debe ser un entero impar positivo.')
+    potencia = np.abs(espectro) ** 2
+    # La mediana ignora los pocos bins ocupados por tonos, así que sigue a la "alfombra".
+    # Es local (no global) porque el ruido puede no ser plano, como la banda del caso 3.
+    mediana = median_filter(potencia, size=ancho, mode='reflect')
+    # Para ruido gaussiano |X|^2 sigue una exponencial, cuya mediana es ln(2) veces la media.
+    return mediana / np.log(2)
+
+
+def ganancia_sustraccion(espectro, alfa=ALFA, g_min=G_MIN, ancho=ANCHO_MEDIANA,
+                         potencia_ruido=None):
+    """Ganancia de sustracción espectral adaptativa para un bloque.
+
+    G[k] = sqrt(max(1 - alfa * Pruido[k] / |X[k]|^2, g_min^2)).
+    Si `potencia_ruido` es None, se estima del propio bloque (parámetro adaptativo);
+    si se recibe (por ejemplo del nodo 1), se usa esa estimación.
+    """
+    potencia = np.abs(espectro) ** 2
+    if potencia_ruido is None:
+        potencia_ruido = estimar_potencia_ruido(espectro, ancho)
+    # Se resta alfa veces el ruido estimado a la potencia de cada bin: los bins que son
+    # casi solo ruido quedan cerca de 0 y los tonos, muy por encima, quedan cerca de 1.
+    # El 1e-30 evita dividir entre cero en bins totalmente vacíos.
+    restante = 1 - alfa * potencia_ruido / np.maximum(potencia, 1e-30)
+    # La raíz convierte la fracción de potencia en ganancia de amplitud.
+    return np.sqrt(np.maximum(restante, g_min ** 2))
+
+
+def snr_db(referencia, salida):
+    """SNR de la salida respecto a la referencia limpia, en dB."""
+    referencia = np.asarray(referencia, dtype=np.float64)
+    error = referencia - np.asarray(salida, dtype=np.float64)
+    return float(10 * np.log10(np.sum(referencia ** 2) / np.sum(error ** 2)))
 
 
 def procesar_bloques(entrada, n=N_BLOQUE, ganancia=ganancia_unitaria):
@@ -78,6 +123,12 @@ def procesar_bloques(entrada, n=N_BLOQUE, ganancia=ganancia_unitaria):
         # La ventana de síntesis suaviza los bordes que la modificación pudo alterar.
         salida[inicio:inicio + n] += recuperado * ventana
     return salida[salto:salto + len(entrada)]
+
+
+def reducir_ruido(entrada, n=N_BLOQUE, alfa=ALFA, g_min=G_MIN, ancho=ANCHO_MEDIANA):
+    """Reducción espectral completa: bloques + sustracción espectral adaptativa."""
+    return procesar_bloques(
+        entrada, n, lambda espectro: ganancia_sustraccion(espectro, alfa, g_min, ancho))
 
 
 def verificar_simetria(bloque, ganancia_medio):
