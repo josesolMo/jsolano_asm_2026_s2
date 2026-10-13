@@ -77,6 +77,7 @@ def figura_caso(caso, limpia, entrada, salida, ruta):
 TONOS_HZ = (440.0, 880.0, 1320.0)  # De metadatos/configuraciones.json.
 ALFAS_BARRIDO = (0.25, 0.5, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 64)
 COLORES_TONOS = ('#2a78d6', '#eb6834', '#1baf7a')  # Orden fijo: un color por tono.
+ALFAS_AUDIO = (1, 6, 64)  # Audios del caso 3 para escuchar cómo se pierde el tono de 1320 Hz.
 
 
 def energia_tonos(senal, tonos=TONOS_HZ):
@@ -99,6 +100,8 @@ def barrido_alfa(raiz=RAIZ, casos=(2, 3), alfas=ALFAS_BARRIDO):
         referencia = energia_tonos(limpia)
         for alfa in alfas:
             salida = reducir_ruido(entrada, alfa=alfa)
+            if caso == 3 and alfa in ALFAS_AUDIO:
+                guardar_wav(raiz / f'resultados/filtrado_espectral/caso_3/05_alfa_{alfa:g}.wav', salida)
             conservada = 100 * energia_tonos(salida) / referencia
             fila = dict(caso=caso, alfa=alfa, snr_salida_dB=round(snr_db(limpia, salida), 3))
             fila.update({f'energia_{int(f)}Hz_pct': round(p, 2) for f, p in zip(TONOS_HZ, conservada)})
