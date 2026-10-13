@@ -34,6 +34,17 @@ def espectro_db(senal, inicio, n=N_BLOQUE):
     return 20 * np.log10(np.abs(np.fft.rfft(senal[inicio:inicio + n] * ventana)) + 1e-9)
 
 
+def atenuacion_db(entrada, salida, frecuencia):
+    """Atenuación de un tono: potencia en su bin antes y después, sobre toda la señal."""
+    # Una FFT larga con Hann da resolución fina (16000/96000 ≈ 0.17 Hz) y poca fuga.
+    ventana = np.hanning(len(entrada))
+    k = int(round(frecuencia * len(entrada) / FS))
+    zona = slice(k - 3, k + 4)  # Margen por si la frecuencia estimada cae entre bins.
+    p_entrada = np.max(np.abs(np.fft.rfft(entrada * ventana)[zona]) ** 2)
+    p_salida = np.max(np.abs(np.fft.rfft(salida * ventana)[zona]) ** 2)
+    return float(10 * np.log10(p_entrada / p_salida))
+
+
 def figura_caso(caso, limpia, entrada, salida, ruta):
     """Espectro de un bloque y fragmento temporal: entrada, salida y referencia."""
     inicio = 3 * N_BLOQUE  # Un bloque alejado del inicio, ya en régimen estable.
@@ -70,7 +81,11 @@ def ejecutar_analisis(raiz=RAIZ):
         carpeta = raiz / 'pruebas' / f'caso_{caso}'
         limpia = leer_wav(carpeta / '01_referencia_limpia.wav')
         entrada = leer_wav(carpeta / '03_entrada_contaminada.wav')
-        salida = reducir_ruido(entrada)
+        registro = []
+        salida = reducir_ruido(entrada, registro=registro)
+        detectadas = np.concatenate(registro)
+        # La mediana resume la frecuencia estimada en todos los bloques que detectaron algo.
+        f_interferente = float(np.median(detectadas)) if len(detectadas) else None
 
         guardar_wav(raiz / f'resultados/filtrado_espectral/caso_{caso}/04_filtrada_espectral.wav', salida)
         figura_caso(caso, limpia, entrada, salida, raiz / f'resultados/figuras/espectral_caso_{caso}.png')
@@ -80,7 +95,11 @@ def ejecutar_analisis(raiz=RAIZ):
                           snr_entrada_dB=round(snr_entrada, 3), snr_salida_dB=round(snr_salida, 3),
                           mejora_snr_dB=round(snr_salida - snr_entrada, 3),
                           mse_entrada=float(np.mean((limpia - entrada) ** 2)),
-                          mse_salida=float(np.mean((limpia - salida) ** 2))))
+                          mse_salida=float(np.mean((limpia - salida) ** 2)),
+                          bloques_con_pico_pct=round(100 * np.mean([len(r) > 0 for r in registro]), 1),
+                          frecuencia_interferente_Hz=f_interferente,
+                          atenuacion_interferencia_dB=(round(atenuacion_db(entrada, salida, f_interferente), 2)
+                                                       if f_interferente else None)))
 
     ruta_csv = raiz / 'resultados/metricas_espectrales.csv'
     ruta_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -95,4 +114,8 @@ if __name__ == '__main__':
     for fila in ejecutar_analisis():
         print(f"Caso {fila['caso']}: SNR {fila['snr_entrada_dB']:.2f} dB -> "
               f"{fila['snr_salida_dB']:.2f} dB (mejora {fila['mejora_snr_dB']:+.2f} dB)")
+        if fila['frecuencia_interferente_Hz']:
+            print(f"  interferencia estimada en {fila['frecuencia_interferente_Hz']:.1f} Hz "
+                  f"({fila['bloques_con_pico_pct']}% de bloques), "
+                  f"atenuada {fila['atenuacion_interferencia_dB']:.1f} dB")
     print('Resultados guardados en tarea1_grupo/resultados/')

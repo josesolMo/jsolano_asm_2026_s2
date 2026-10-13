@@ -13,6 +13,10 @@ N_BLOQUE = 1024
 ALFA = 6.0          # Factor de sobresustracción: cuántas veces el ruido medio se resta.
 G_MIN = 0.05        # Ganancia mínima (-26 dB): deja un residuo en vez de huecos de silencio.
 ANCHO_MEDIANA = 31  # Bins de la mediana local (~484 Hz con N=1024 a 16 kHz).
+BANDA_UTIL = (340.0, 1420.0)  # Hz; de metadatos/configuraciones.json (igual en los 3 casos).
+UMBRAL_PICO_DB = 20.0  # Cuánto debe sobresalir un pico del ruido local para ser interferencia.
+ANCHO_MUESCA = 4       # Bins atenuados a cada lado del pico (±62.5 Hz con N=1024).
+G_MUESCA = 0.0         # Ganancia dentro de la muesca.
 
 
 def leer_wav(ruta):
@@ -77,6 +81,33 @@ def ganancia_sustraccion(espectro, alfa=ALFA, g_min=G_MIN, ancho=ANCHO_MEDIANA,
     return np.sqrt(np.maximum(restante, g_min ** 2))
 
 
+def detectar_picos(espectro, n, banda_util=BANDA_UTIL, umbral_db=UMBRAL_PICO_DB,
+                   ancho=ANCHO_MEDIANA):
+    """Devuelve los bins de picos interferentes: máximos locales fuera de la banda útil
+    que superan en `umbral_db` la potencia de ruido estimada en su vecindad."""
+    potencia = np.abs(espectro) ** 2
+    frecuencias = np.arange(len(espectro)) * FS / n
+    fuera = (frecuencias < banda_util[0]) | (frecuencias > banda_util[1])
+    # Máximo local: mayor o igual que sus dos vecinos; así se marca solo la cima del pico.
+    maximo = np.zeros(len(potencia), dtype=bool)
+    maximo[1:-1] = (potencia[1:-1] >= potencia[:-2]) & (potencia[1:-1] >= potencia[2:])
+    # 20 dB = 100 veces el ruido medio. En ruido gaussiano un bin supera eso con
+    # probabilidad e^-100, así que la alfombra nunca dispara la detección.
+    sobresale = potencia > 10 ** (umbral_db / 10) * estimar_potencia_ruido(espectro, ancho)
+    return np.flatnonzero(maximo & fuera & sobresale)
+
+
+def aplicar_muescas(ganancia, picos, ancho=ANCHO_MUESCA, g_muesca=G_MUESCA):
+    """Baja la ganancia a g_muesca en ±ancho bins alrededor de cada pico."""
+    ganancia = ganancia.copy()
+    for k in picos:
+        # Se cubre el lóbulo principal y los primeros laterales de la ventana, donde
+        # el tono también deja energía; con un solo bin quedaría casi todo su residuo.
+        zona = slice(max(k - ancho, 0), k + ancho + 1)
+        ganancia[zona] = np.minimum(ganancia[zona], g_muesca)
+    return ganancia
+
+
 def snr_db(referencia, salida):
     """SNR de la salida respecto a la referencia limpia, en dB."""
     referencia = np.asarray(referencia, dtype=np.float64)
@@ -125,10 +156,21 @@ def procesar_bloques(entrada, n=N_BLOQUE, ganancia=ganancia_unitaria):
     return salida[salto:salto + len(entrada)]
 
 
-def reducir_ruido(entrada, n=N_BLOQUE, alfa=ALFA, g_min=G_MIN, ancho=ANCHO_MEDIANA):
-    """Reducción espectral completa: bloques + sustracción espectral adaptativa."""
-    return procesar_bloques(
-        entrada, n, lambda espectro: ganancia_sustraccion(espectro, alfa, g_min, ancho))
+def reducir_ruido(entrada, n=N_BLOQUE, alfa=ALFA, g_min=G_MIN, ancho=ANCHO_MEDIANA,
+                  banda_util=BANDA_UTIL, umbral_db=UMBRAL_PICO_DB, registro=None):
+    """Reducción espectral completa: sustracción adaptativa + muescas en picos interferentes.
+
+    Si `registro` es una lista, se le agrega por bloque un arreglo con las
+    frecuencias (Hz) de los picos detectados.
+    """
+    def ganancia(espectro):
+        g = ganancia_sustraccion(espectro, alfa, g_min, ancho)
+        picos = detectar_picos(espectro, n, banda_util, umbral_db, ancho)
+        if registro is not None:
+            registro.append(picos * FS / n)
+        return aplicar_muescas(g, picos)
+
+    return procesar_bloques(entrada, n, ganancia)
 
 
 def verificar_simetria(bloque, ganancia_medio):

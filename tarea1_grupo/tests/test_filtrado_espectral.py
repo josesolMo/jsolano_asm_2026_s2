@@ -6,7 +6,8 @@ from pathlib import Path
 import numpy as np
 
 from tarea1_grupo.src.filtrado_espectral import (
-    G_MIN, estimar_potencia_ruido, ganancia_sustraccion, leer_wav, procesar_bloques,
+    ANCHO_MUESCA, FS, G_MIN, G_MUESCA, aplicar_muescas, detectar_picos,
+    estimar_potencia_ruido, ganancia_sustraccion, leer_wav, procesar_bloques,
     reducir_ruido, snr_db, ventana_raiz_hann, verificar_simetria)
 
 RAIZ = Path(__file__).resolve().parents[1]
@@ -89,13 +90,52 @@ class PruebasGananciaAdaptativa(unittest.TestCase):
         np.testing.assert_allclose(g, 0.5)
 
     def test_mejora_en_casos(self):
-        # Con ruido de banda ancha (2) y de banda limitada (3) la SNR debe subir claramente.
-        for caso, mejora_minima in ((2, 12), (3, 10)):
+        # Tono interferente (1), banda ancha (2) y banda limitada (3): la SNR debe subir claramente.
+        for caso, mejora_minima in ((1, 30), (2, 12), (3, 10)):
             carpeta = RAIZ / f'pruebas/caso_{caso}'
             limpia = leer_wav(carpeta / '01_referencia_limpia.wav')
             entrada = leer_wav(carpeta / '03_entrada_contaminada.wav')
             mejora = snr_db(limpia, reducir_ruido(entrada)) - snr_db(limpia, entrada)
             self.assertGreater(mejora, mejora_minima)
+
+
+class PruebasPicosInterferentes(unittest.TestCase):
+    def bloque(self, frecuencias, sigma=0.01, semilla=5):
+        """Espectro de un bloque con tonos dados más ruido blanco."""
+        rng = np.random.default_rng(semilla)
+        t = np.arange(1024) / FS
+        x = sum(np.sin(2 * np.pi * f * t) for f in frecuencias) + sigma * rng.standard_normal(1024)
+        return np.fft.rfft(x * ventana_raiz_hann(1024))
+
+    def test_detecta_frecuencia_desconocida(self):
+        # Adaptativo: la interferencia se encuentra donde esté, no en un bin fijo.
+        for f in (60, 2000, 2500, 3170, 6000):
+            picos = detectar_picos(self.bloque([440, f]), 1024) * FS / 1024
+            self.assertEqual(len(picos), 1)
+            self.assertLessEqual(abs(picos[0] - f), FS / 1024)
+
+    def test_respeta_banda_util(self):
+        # Los tonos dentro de la banda útil nunca se marcan como interferencia.
+        self.assertEqual(len(detectar_picos(self.bloque([440, 880, 1320]), 1024)), 0)
+
+    def test_sin_falsos_en_ruido(self):
+        # Ruido blanco solo: ningún bin de la alfombra debe confundirse con un tono.
+        for semilla in range(100):
+            self.assertEqual(len(detectar_picos(self.bloque([], 1.0, semilla), 1024)), 0)
+
+    def test_muesca(self):
+        # La muesca cubre ±ANCHO_MUESCA bins y no toca el resto.
+        g = aplicar_muescas(np.ones(513), [100])
+        self.assertTrue(np.all(g[100 - ANCHO_MUESCA:100 + ANCHO_MUESCA + 1] == G_MUESCA))
+        self.assertEqual(np.sum(g == 1), 513 - (2 * ANCHO_MUESCA + 1))
+
+    def test_registro_caso_1(self):
+        # En el caso 1 se debe estimar la interferencia en ~2500 Hz en casi todos los bloques.
+        registro = []
+        reducir_ruido(leer_wav(RAIZ / 'pruebas/caso_1/03_entrada_contaminada.wav'), registro=registro)
+        detectadas = np.concatenate(registro)
+        self.assertGreater(len(detectadas), 0.95 * len(registro))
+        self.assertTrue(np.all(np.abs(detectadas - 2500) <= FS / 1024))
 
 
 if __name__ == '__main__':
