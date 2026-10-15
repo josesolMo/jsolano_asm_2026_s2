@@ -1,0 +1,5 @@
+caso,atol,rtol,error_max_scipy,error_max_bloques,bloque_muestras,ultimo_bloque_muestras
+impulso,1e-10,1e-10,0.0,0.0,17,12
+caso_1,1e-10,1e-10,4.440892098500626e-16,0.0,1024,768
+caso_2,1e-10,1e-10,3.885780586188048e-16,0.0,1024,768
+caso_3,1e-10,1e-10,5.551115123125783e-16,0.0,1024,768

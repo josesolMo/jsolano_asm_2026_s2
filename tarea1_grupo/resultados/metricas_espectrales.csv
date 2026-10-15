@@ -1,0 +1,4 @@
+caso,N,alfa,g_min,ancho_mediana,snr_entrada_dB,snr_salida_dB,mejora_snr_dB,mse_entrada,mse_salida,bloques_con_pico_pct,frecuencia_interferente_Hz,atenuacion_interferencia_dB
+1,1024,6.0,0.05,31,5.0,45.624,40.624,0.03213528166946765,2.783566655929754e-06,99.5,2500.0,94.72
+2,1024,6.0,0.05,31,3.0,19.345,16.345,0.01535597736899489,0.0003562797637222182,0.0,,
+3,1024,6.0,0.05,31,-0.0,12.162,12.162,0.018478672003663543,0.001123200273214273,0.0,,
