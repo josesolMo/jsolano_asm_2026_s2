@@ -1,0 +1,149 @@
+\documentclass[conference]{IEEEtran}
+\usepackage[utf8]{inputenc}
+\usepackage[spanish]{babel}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{url}
+
+% Configuración de colores para código fuente
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\scriptsize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+\lstset{style=mystyle}
+
+\title{Documento Complementario: Herramientas de Ingeniería Aplicadas al Radar Acústico Monostático}
+
+\author{\IEEEauthorblockN{José Andrés Solano Mora}
+\IEEEauthorblockA{\textit{Escuela de Ingeniería en Computadores} \\
+\textit{Tecnológico de Costa Rica}\\
+Cartago, Costa Rica}
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Este documento técnico detalla la selección, aplicación y adaptación de las herramientas hardware, software, analíticas y de Inteligencia Artificial involucradas en la solución del sistema de radar acústico monostático. Se justifica la integración del microcontrolador ATmega328P, el entorno Python para procesamiento digital de señales (PDS) y el soporte de IA generativa (Gemini) en el diseño algorítmico y matemático, cumpliendo con la extensión máxima de 2 páginas.
+\end{abstract}
+
+\section{Selección de Técnicas, Recursos, Herramientas o Métodos}
+Para resolver la estimación de distancia por tiempo de vuelo (\textit{Time of Flight}, ToF) considerando las restricciones físicas del sistema acústico, se seleccionaron las siguientes herramientas organizadas por dominio:
+
+\subsection{Plataforma de Hardware Empotrado}
+\begin{itemize}
+    \item \textbf{Microcontrolador ATmega328P (Arduino):} Seleccionado por su temporización por hardware precisa y control de periféricos mediante acceso a registros.
+    \item \textbf{Transductor Piezoeléctrico Pasivo:} Utilizado como elemento emisor mediante excitación con modulación de frecuencia constante a $2\text{ kHz}$.
+    \item \textbf{Micrófono Electret con Preamplificador MAX4466:} Seleccionado como receptor debido a su ganancia ajustable y respuesta en frecuencia apta para la banda audible.
+\end{itemize}
+
+\subsection{Entorno de Procesamiento Digital y Software}
+\begin{itemize}
+    \item \textbf{Lenguaje C/C++ (Arduino AVR):} Empleado para la adquisición determinista a la frecuencia de muestreo $F_s = 10\text{ kHz}$.
+    \item \textbf{Python 3 (NumPy, PySerial, Matplotlib):} Utilizado para la captura serial, eliminación de sesgo DC, implementación del filtro adaptado y graficación en tiempo real.
+    \item \textbf{Transformada Rápida de Fourier (FFT):} Método matemático seleccionado para realizar la correlación cruzada en el dominio de la frecuencia, reduciendo la complejidad computacional de $\mathcal{O}(N^2)$ a $\mathcal{O}(N \log_2 N)$.
+\end{itemize}
+
+\subsection{Herramientas de Inteligencia Artificial y Guía}
+\begin{itemize}
+    \item \textbf{Modelo de Lenguaje (Gemini AI):} Utilizado como herramienta de asistencia técnica en la optimización de código en Python, derivación de ecuaciones de correlación cruzada y maquetación de informes técnicos en LaTeX.
+\end{itemize}
+
+\section{Aplicación de las Herramientas en el Problema Complejo de Ingeniería}
+El problema complejo radica en detectar un eco acústico atenuado e inmerso en ruido de acoplamiento directo utilizando un microcontrolador de 8 bits y transmisión de bajo ancho de banda. Las herramientas se aplican secuencialmente según el flujo funcional presentado en la Fig. \ref{fig:flujo}.
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\linewidth}{\centering
+\textbf{Emisión Tono ($2\text{ kHz}$ / $10\text{ ms}$)} $\rightarrow$ \textbf{ADC AVR ($10\text{ kHz}$)} \\
+$\downarrow$ \\
+\textbf{UART Serial ($115200\text{ baud}$)} $\rightarrow$ \textbf{Python NumPy} \\
+$\downarrow$ \\
+\textbf{Filtro Adaptado (FFT)} $\rightarrow$ \textbf{Estimación ToF / Distancia}
+}}
+\caption{Diagrama de flujo operacional de las herramientas involucradas.}
+\label{fig:flujo}
+\end{figure}
+
+\subsection{Adquisición Sincronizada en C++}
+En la plataforma empotrada, la función \texttt{tone(9, 2000)} genera el pulso de sondeo. Simultáneamente, mediante un bucle determinista de microsegundos (\texttt{micros()}), se toman $N = 600$ muestras ($60\text{ ms}$ totales) a un intervalo $T_s = 100\,\mu\text{s}$. Las muestras digitalizadas se envían vía UART a $115200\text{ baudios}$.
+
+\subsection{Procesamiento Digital en Python}
+El script en Python lee el flujo serial y ejecuta el algoritmo de estimación mediante el siguiente modelo matemático:
+\begin{equation}
+y_{\text{centrada}}[n] = y[n] - \frac{1}{N} \sum_{i=0}^{N-1} y[i]
+\end{equation}
+Posteriormente, se genera el patrón ideal $x_{\text{patrón}}[n]$ modulado por una ventana Hanning y se calcula la correlación cruzada mediante el producto de transformadas:
+\begin{equation}
+R_{yx}[m] = \mathcal{F}^{-1} \left\{ \mathcal{F}\{y[n]\} \cdot \mathcal{F}^*\{x_{\text{patrón}}[n]\} \right\}
+\end{equation}
+
+\subsection{Soporte de IA Generativa en el Desarrollo}
+La herramienta Gemini AI se aplicó como un colaborador de diseño. Específicamente, se utilizó para:
+\begin{enumerate}
+    \item Validar la corrección sintáctica de las operaciones matriciales en \texttt{NumPy}.
+    \item Ajustar la ventana Hanning para mitigar la fuga espectral (\textit{spectral leakage}).
+    \item Formatear las ecuaciones matemáticas y tablas de resultados bajo el estándar IEEE.
+\end{enumerate}
+
+\section{Adaptación de Técnicas, Recursos o Métodos}
+Para lograr que las herramientas seleccionadas funcionaran en el contexto del problema, fue necesario realizar tres adaptaciones clave en el software y hardware:
+
+\subsection{Aceleración del Convertidor Analógico a Digital (ADC)}
+Por defecto, la función \texttt{analogRead()} de Arduino utiliza un prescaler de ADC de 128, lo que impone un tiempo de conversión de $\approx 112\,\mu\text{s}$, haciendo imposible sostener una tasa de muestreo fija de $10\text{ kHz}$ ($100\,\mu\text{s}$). Se modificó directamente el registro de control \texttt{ADCSRA} del ATmega328P para cambiar el prescaler a 64 (\texttt{0b00000110}):
+
+\begin{lstlisting}[language=C, caption={Adaptación a nivel de registros del ADC AVR.}]
+// Ajuste del prescaler a 64 (f_ADC = 16MHz/64 = 250kHz)
+// Tiempo de conversion reducido a ~52 microsegundos
+ADCSRA = (ADCSRA & 0b11111000) | 0b00000110;
+\end{lstlisting}
+
+Esta adaptación liberó suficiente tiempo de procesamiento para realizar la temporización de precisión del bucle sin perder muestras.
+
+\subsection{Enmascaramiento Dinámico de Zona Ciega (Blanking)}
+La cercanía física entre el buzzer y el micrófono produce una saturación por transmisión sólida durante la emisión del pulso ($10\text{ ms}$). Si se aplicara la correlación directa, el pico máximo siempre ocurriría en $m = 0$. 
+
+Se adaptó el algoritmo de búsqueda recortando los primeros $105$ desfases ($10.5\text{ ms}$), ignorando la ráfaga directa y buscando el pico únicamente en la zona de retorno útil:
+
+\begin{lstlisting}[language=Python, caption={Adaptación del algoritmo de correlación en Python.}]
+# Mascara para omitir el disparo directo (105 muestras)
+lag_minimo_eco = 105               
+zona_busqueda = correlacion_positiva[lag_minimo_eco:]
+lag_detectado = lag_minimo_eco + np.argmax(np.abs(zona_busqueda))
+\end{lstlisting}
+
+\subsection{Insonorización e Impedancia del Blanco Acústico}
+Para adaptar las limitaciones del receptor MAX4466 frente al ruido ambiental, se modificó el objeto de prueba cubriendo una estructura de cartón con múltiples capas de papel aluminio. Esta adaptación del recurso físico aprovechó la gran diferencia de impedancia acústica entre el aire y el metal, elevando la amplitud del eco reflejado por encima del nivel de ruido del preamplificador.
+
+\section{Conclusiones sobre el Uso de Herramientas}
+La combinación de optimización a nivel de registros en el hardware empotrado, el procesamiento espectral mediante Python/FFT y el uso guiado de herramientas de IA permitió resolver un problema complejo de medición espacial dentro de las restricciones impuestas de costo y tiempo de procesamiento.
+
+\section{Referencias}
+\begin{thebibliography}{00}
+\bibitem{atmega328p} Microchip Technology, ``ATmega328P 8-bit AVR Microcontroller Datasheet,'' DS40002061B, 2018.
+\bibitem{numpy} C. R. Harris \textit{et al.}, ``Array programming with NumPy,'' \textit{Nature}, vol. 585, pp. 357--362, 2020.
+\end{thebibliography}
+
+\end{document}
