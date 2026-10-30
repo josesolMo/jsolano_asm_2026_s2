@@ -30,7 +30,7 @@ uint32_t recortes = 0;
 uint32_t errores = 0;
 esp_err_t ultimoError = ESP_OK;
 
-// La ISR solo registra el fin de la cadena; nunca calcula ni imprime muestras.
+// La ISR solo registra el fin de la cadena
 portMUX_TYPE cerrojo = portMUX_INITIALIZER_UNLOCKED;
 volatile uint32_t finalesDma = 0;
 volatile uint32_t convertidas = 0;
@@ -162,7 +162,7 @@ void ayuda() {
     Serial.println("Seleccionar otro modo detiene; luego pulse i. Todos duran 4.096 s.");
 }
 
-// La tasa real no es medida por software; se informa explicitamente esta limitacion.
+// La tasa real no es medida por software
 void estado() {
     // Todos los contadores ISR se capturan juntos antes de imprimir.
     uint32_t finales, convertidasCopia, fallosDma;

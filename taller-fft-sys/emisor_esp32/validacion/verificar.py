@@ -95,5 +95,5 @@ def main():
 
 
 if __name__ == "__main__":
-    # Esta entrada solo ejecuta la comprobacion solicitada y no modifica las referencias.
+    
     main()

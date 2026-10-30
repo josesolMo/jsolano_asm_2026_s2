@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import tempfile
 
-# Los dobles solo simulan respuestas de API y serial; no simulan voltajes ni reloj.
+# Los dobles solo simulan respuestas de API y serial
 MOCK = r'''
 #pragma once
 #include <cstdint>
