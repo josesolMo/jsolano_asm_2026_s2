@@ -36,7 +36,18 @@ BANDA_UTIL = (340.0, 1420.0)  # Hz; configurable desde la interfaz
 # C6: frecuencias que el emisor tiene configuradas (taller semana 12). Se toman las
 # de la Tarea 1; el emisor real las comunica o se cargan por UART.
 FRECUENCIAS_EMISOR = (440.0, 880.0, 1320.0, 2500.0)
+# Tabla por modo del emisor real (emisor_esp32/senales.h, comandos 1 a 4).
+TABLAS_POR_MODO = {
+    1: (1000.0,),               # seno de 1000 Hz
+    2: (2500.0,),               # seno de 2500 Hz (interferente individual)
+    3: (440.0, 880.0, 1320.0),  # multitono
+    4: (600.0,),                # transitoria: rafagas de 600 Hz que decaen
+}
 TOLERANCIA_EMISOR_HZ = FS / N_BLOQUE  # ±1 bin: 60 veces el error de la interpolación
+# C6: una frecuencia ajena a la tabla solo se reporta si está a menos de 40 dB del tono
+# más fuerte (mismo rango que RANGO_PICO_DB de full_system). Más abajo están los
+# armónicos de cuantización del DAC de 8 bits (~ -48 dB), que no son interferencias.
+RANGO_RELATIVO_DB = 40.0
 
 # Banderas de la trama de parámetros.
 FLAG_INTERFERENTE = 0x01
@@ -216,12 +227,13 @@ class Receptor:
 
 
 def validar_contra_emisor(validadas, tabla=FRECUENCIAS_EMISOR,
-                          tolerancia=TOLERANCIA_EMISOR_HZ):
+                          tolerancia=TOLERANCIA_EMISOR_HZ, rango_db=RANGO_RELATIVO_DB):
     """C6: compara las frecuencias validadas con las que el emisor debía enviar.
 
     Devuelve (reporte, no_esperadas). El reporte trae, por cada frecuencia de la
     tabla, si se recibió, el error en Hz y la amplitud; no_esperadas son las
-    validadas que no corresponden a ninguna frecuencia del emisor.
+    validadas que no corresponden a ninguna frecuencia del emisor y que están a
+    menos de `rango_db` del tono más fuerte.
     """
     reporte, usadas = [], set()
     for f_tabla in tabla:
@@ -237,12 +249,15 @@ def validar_contra_emisor(validadas, tabla=FRECUENCIAS_EMISOR,
         else:
             reporte.append({'f_emisor_hz': f_tabla, 'recibida': False,
                             'error_hz': None, 'amplitud': None})
-    no_esperadas = [v for i, v in enumerate(validadas) if i not in usadas]
+    # El tono más fuerte fija la referencia; lo que queda 40 dB por debajo se ignora.
+    piso = max((v['amplitud'] for v in validadas), default=0) * 10 ** (-rango_db / 20)
+    no_esperadas = [v for i, v in enumerate(validadas)
+                    if i not in usadas and v['amplitud'] >= piso]
     return reporte, no_esperadas
 
 
 def crc16_ccitt(datos, crc=0xFFFF):
-    """CRC-16/CCITT-FALSE (polinomio 0x1021), el mismo que trae esp_crc16 / es fácil en C."""
+    """CRC-16/CCITT-FALSE (polinomio 0x1021), el mismo que usa full_system/sistema_ruido/link.py."""
     for byte in datos:
         crc ^= byte << 8
         for _ in range(8):

@@ -116,6 +116,14 @@ class PruebasEmisor(unittest.TestCase):
         self.assertEqual(len(extra), 1)
 
 
+    def test_ignora_residuos_bajo_40_db(self):
+        # Un armónico de cuantización a -48 dB no es una interferencia; uno a -20 dB sí.
+        validadas = [{'f_hz': 1000.0, 'amplitud': 0.3}, {'f_hz': 3000.0, 'amplitud': 0.3 * 10 ** (-48 / 20)},
+                     {'f_hz': 3700.0, 'amplitud': 0.03}]
+        _, extra = validar_contra_emisor(validadas, (1000.0,))
+        self.assertEqual([e['f_hz'] for e in extra], [3700.0])
+
+
 class PruebasTrama(unittest.TestCase):
     def test_ida_y_vuelta(self):
         datos = [{'f_hz': 2513.75, 'snr_local_db': 41.4, 'flags': FLAG_INTERFERENTE},
