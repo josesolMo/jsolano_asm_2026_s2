@@ -24,10 +24,10 @@
 ]
 
 % ---- Fila 1: emisor y adquisición ----------------------------------------
-\node[analog] (emi) {Emisor ($\mu$C)\\DAC/PWM con\\tabla $\{f_i\}$};
-\node[analog, right=6mm of emi] (sig) {Canal\\+ ruido};
-\node[analog, right=6mm of sig] (aa) {Acondic. y\\antialiasing\\$f_c < f_s/2$};
-\node[analog, right=6mm of aa] (adc) {ADC 12 bit\\$f_s = 16$ kHz\\(timer + DMA)};
+\node[analog] (emi) {Emisor ESP32\\DAC1 (GPIO25)\\8 bit, 16 kHz};
+\node[analog, right=6mm of emi] (sig) {Cable\\+ GND\\común};
+\node[analog, right=6mm of sig] (aa) {Filtro RC\\(recomendado)\\$f_c < f_s/2$};
+\node[analog, right=6mm of aa] (adc) {ESP32-S3\\ADC1 can. 3\\(GPIO4), 16 kHz};
 \node[dsp, right=6mm of adc] (dma) {Búfer doble\\2 × 512\\muestras};
 \node[dsp, right=6mm of dma] (blk) {Bloque\\$N = 1024$\\(50 \% solap.)};
 
@@ -55,7 +55,7 @@
 \node[decision, right=6mm of cand] (interp) {Interpolación\\parabólica\\$\hat f,\ \hat A$};
 \node[decision, right=6mm of interp] (pers) {Seguimiento\\C4: 3 de 4\\+ histéresis};
 \node[decision, right=6mm of pers] (clas) {Clasificación C5\\útil / interf.\\/ armónico};
-\node[decision, right=6mm of clas] (tabla) {C6: tabla del\\emisor $\{f_i\}$\\$\pm 1$ bin};
+\node[decision, right=6mm of clas] (tabla) {C6: tabla del\\emisor, $\pm 1$ bin\\y rango 40 dB};
 \node[com, right=6mm of tabla] (rep) {Reporte por $f_i$:\\recibida / ausente\\+ no esperadas};
 
 \draw[linea] (piso.south) -- ++(0,-6mm) -| (cand.north);

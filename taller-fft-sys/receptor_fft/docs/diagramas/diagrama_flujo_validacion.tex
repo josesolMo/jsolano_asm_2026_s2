@@ -86,7 +86,7 @@
 \draw[linea] (c6) -- node[et, right] {sí} (rec);
 \draw[linea] (rec) -- (aus2);
 \draw[linea] (aus2) -- (tx);
-\node[fin, right=12mm of c6] (noesp) {NO ESPERADA:\\posible interferencia};
+\node[fin, right=12mm of c6] (noesp) {NO ESPERADA si está a\\menos de 40 dB del\\tono más fuerte};
 \draw[linea] (c6) -- node[et, above] {no} (noesp);
 \draw[linea] (noesp.south) |- (aus2.east);
 \draw[linea] (tx) -- (end);
