@@ -24,18 +24,20 @@ del grupo; aquí están el código, las pruebas y las fuentes de los diagramas.
 | C3 Forma tonal | Ancho a −6 dB de 3 bins o menos |
 | C4 Persistencia | Presente en 3 de los últimos 4 bloques (histéresis: se mantiene con 2) |
 | C5 Clasificación | Útil (dentro de la banda útil), interferente o armónico |
-| C6 Tabla del emisor | Recibida si está a ±1 bin (15.6 Hz) de una frecuencia del emisor; si no, no esperada |
+| C6 Tabla del emisor | Recibida si está a ±1 bin (15.6 Hz) de una frecuencia del emisor; ausente si no aparece; no esperada si está fuera de la tabla y a menos de 40 dB del tono más fuerte |
 
 Parámetros: fs = 16 kHz, N = 1024 (Δf = 15.625 Hz), 50 % de solapamiento.
-La tabla del emisor está en `FRECUENCIAS_EMISOR` dentro de `src/receptor_fft.py`.
+Las tablas por modo del emisor (`emisor_esp32/senales.h`, comandos 1 a 4) están en `TABLAS_POR_MODO` dentro de `src/receptor_fft.py`.
 
 ## Uso
 
-Desde la raíz del repositorio (requiere los paquetes de `tarea1_grupo/requirements.txt`
-y los WAV de `tarea1_grupo/pruebas/`):
+Desde la carpeta `taller-fft-sys/` (requiere numpy, scipy y matplotlib):
 
     python -m receptor_fft.src.evaluar_receptor
     python -m unittest discover -s receptor_fft/tests -t . -v
+
+Si la carpeta `tarea1_grupo/` está junto a `taller-fft-sys/`, también se evalúan sus
+tres casos; si no, se omiten con un aviso.
 
 Para recompilar los diagramas:
 
