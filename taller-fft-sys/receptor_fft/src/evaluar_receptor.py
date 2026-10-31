@@ -16,14 +16,17 @@ from scipy.io import wavfile
 from scipy.signal import butter, sosfilt
 
 from receptor_fft.src.receptor_fft import (
-    FLAG_ARMONICO, FLAG_INTERFERENTE, FRECUENCIAS_EMISOR, FS, N_BLOQUE, SALTO, UMBRAL_DB,
-    Receptor, candidatos_bloque, espectro_potencia, interpolar_pico, procesar_senal,
-    validar_contra_emisor)
+    FLAG_ARMONICO, FLAG_INTERFERENTE, FRECUENCIAS_EMISOR, FS, N_BLOQUE, SALTO,
+    TABLAS_POR_MODO, UMBRAL_DB, Receptor, candidatos_bloque, espectro_potencia,
+    interpolar_pico, procesar_senal, validar_contra_emisor)
 
 RAIZ = Path(__file__).resolve().parents[2]
 SALIDA = RAIZ / 'receptor_fft' / 'resultados'
 FIGURAS = SALIDA / 'figuras'
 SEMILLA = 20261106
+# Los WAV de la Tarea 1 pueden estar junto a esta carpeta o un nivel más arriba.
+TAREA1 = next((p / 'tarea1_grupo' for p in (RAIZ, RAIZ.parent) if (p / 'tarea1_grupo').is_dir()),
+              None)
 
 
 def tres_tonos(t):
@@ -78,9 +81,12 @@ def resumen(nombre, resultados, f_esperada, t_inicio=0.0, t_fin=None, tol=2 * FS
 def pruebas_casos():
     """Casos 1-3 de la Tarea 1 tal como están en los WAV."""
     filas = []
+    if TAREA1 is None:
+        print('No se encontró tarea1_grupo/: se omiten los casos de la Tarea 1.')
+        return filas
     esperadas = {1: 2500.0, 2: None, 3: None}
     for caso, f in esperadas.items():
-        fs, datos = wavfile.read(RAIZ / f'tarea1_grupo/pruebas/caso_{caso}/03_entrada_contaminada.wav')
+        fs, datos = wavfile.read(TAREA1 / f'pruebas/caso_{caso}/03_entrada_contaminada.wav')
         assert fs == FS
         filas.append(resumen(f'Tarea 1 caso {caso}', procesar_senal(datos / 32767), f))
     return filas
@@ -192,6 +198,60 @@ def pruebas_emisor(rng):
                                 for c in (f'{int(f)}Hz_recibida_pct', f'{int(f)}Hz_error_max')]
     columnas.append('no_esperadas_por_bloque')
     return [{c: fila.get(c, '') for c in columnas} for fila in filas]
+
+
+def senal_emisor(modo):
+    """Muestras del emisor real (emisor_esp32/senales.h) como códigos del DAC de 8 bits."""
+    n = 65536
+    t = np.arange(n) / FS
+    if modo == 1:
+        x = np.sin(2 * np.pi * 1000 * t)
+    elif modo == 2:
+        x = np.sin(2 * np.pi * 2500 * t)
+    elif modo == 3:
+        x = (np.sin(2 * np.pi * 440 * t) + .55 * np.sin(2 * np.pi * 880 * t + np.radians(35))
+             + .30 * np.sin(2 * np.pi * 1320 * t - np.radians(50)))
+    else:
+        x = np.exp(-5 * np.fmod(t, 1.0)) * (np.sin(2 * np.pi * 2 * t) > 0) * np.sin(2 * np.pi * 600 * t)
+    # Rampa sin^2 de 320 muestras en ambos extremos, igual que el firmware.
+    borde = np.minimum(np.arange(n), n - 1 - np.arange(n))
+    rampa = np.where(borde < 320, np.sin(np.pi * .5 * borde / 319) ** 2, 1.0)
+    x = x * rampa
+    return np.clip(np.round(128 + 80 * x / np.abs(x).max()), 0, 255)
+
+
+def pruebas_modos_emisor(rng):
+    """C6 con el emisor real: DAC de 8 bits (GPIO25) -> cable -> ADC de 12 bits del ESP32-S3.
+
+    El ruido del ADC se modela como gaussiano de 3 LSB (supuesto, no medido) y,
+    como caso pesimista, de 30 LSB.
+    """
+    filas = []
+    for modo, tabla in TABLAS_POR_MODO.items():
+        voltios = senal_emisor(modo) / 255 * 3.3          # salida aproximada del DAC
+        for ruido_lsb in (3, 30):
+            adc = np.round(voltios / 3.1 * 4095 + ruido_lsb * rng.standard_normal(len(voltios)))
+            x = np.clip(adc, 0, 4095) / 4095
+            res = procesar_senal(x)[3:]   # los primeros bloques llenan el historial
+            recibidas = {f: 0 for f in tabla}
+            error = {f: 0.0 for f in tabla}
+            no_esperadas = 0
+            for r in res:
+                reporte, extra = validar_contra_emisor(r, tabla)
+                no_esperadas += len(extra)
+                for item in reporte:
+                    if item['recibida']:
+                        recibidas[item['f_emisor_hz']] += 1
+                        error[item['f_emisor_hz']] = max(error[item['f_emisor_hz']],
+                                                         abs(item['error_hz']))
+            filas.append({
+                'modo': modo, 'tabla_Hz': ' / '.join(f'{f:g}' for f in tabla),
+                'ruido_adc_lsb': ruido_lsb,
+                'recibida_pct': ' / '.join(f'{100 * recibidas[f] / len(res):.1f}' for f in tabla),
+                'error_max_Hz': ' / '.join(f'{error[f]:.2f}' for f in tabla),
+                'no_esperadas_por_bloque': round(no_esperadas / len(res), 2),
+            })
+    return filas
 
 
 def curva_deteccion(rng, repeticiones=300):
@@ -315,6 +375,8 @@ def main():
     interp = error_interpolacion()
     emisor = pruebas_emisor(rng)
     guardar_csv(SALIDA / 'receptor_emisor.csv', emisor)
+    modos = pruebas_modos_emisor(rng)
+    guardar_csv(SALIDA / 'receptor_modos_emisor.csv', modos)
     guardar_csv(SALIDA / 'receptor_pruebas.csv', filas)
     guardar_csv(SALIDA / 'receptor_pd_vs_tnr.csv', curva)
     guardar_csv(SALIDA / 'receptor_error_frecuencia.csv', interp)
@@ -322,7 +384,7 @@ def main():
     otros = {k: v for k, v in extras.items() if not isinstance(v, (list, np.ndarray))}
     guardar_csv(SALIDA / 'receptor_resumen.csv', [{**otros, **fa}])
     figuras(curva, interp, extras)
-    for f in filas + emisor:
+    for f in filas + emisor + modos:
         print(f)
     print(otros, fa)
 
