@@ -1,4 +1,4 @@
-# CE1110 - Persona 4: validacion e integracion FFT
+# CE1110 - validacion e integracion FFT
 
 Esta carpeta **no reemplaza** los modulos de los otros integrantes. Lee los componentes existentes en `taller-fft-sys/full_system/sistema_ruido` para verificar frecuencias y ejecutar los escenarios P1, P2 y P5 de extremo a extremo.
 
