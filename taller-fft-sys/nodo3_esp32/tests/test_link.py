@@ -109,10 +109,16 @@ def main():
                        capture_output=True, text=True).stdout.strip()
     chequeo("secuencia: huecos, repetidas y envoltura u16", s == "0 0 0 0 2 -1 -1 0 | perdidas=2 repetidas=2", s)
 
+    # 5b. formato de entrada: cuenta cruda del ADC (firmware actual del Nodo 1) y Q15
+    r = [float(subprocess.run([str(BIN), "fmt", f, "2048", str(m)], capture_output=True, text=True).stdout)
+         for f, m in (("adc12", 3072), ("adc12", 2048), ("adc12", 0), ("adc12", 4095), ("q15", 16384), ("q15", -32768))]
+    chequeo("formato de entrada adc12 / q15", np.allclose(r, [0.5, 0.0, -1.0, 2047 / 2048, 0.5, -1.0], atol=1e-6), str(r))
+
     # 6. ancho de banda (justificacion de la velocidad)
     d = link.disenar_enlace()
-    chequeo("enlace: 460 800 baud elegido por link.disenar_enlace", d["baud"] == 460800, 
-            f"trama {d['bytes_trama']} B, {d['bits_s']/1e3:.1f} kb/s netos, utilizacion {100*d['utilizacion']:.1f} %")
+    u921 = d["bits_s"] / 921600
+    chequeo("enlace: 460 800 baud es el minimo de link.disenar_enlace; el Nodo 1 usa 921 600", d["baud"] == 460800, 
+            f"trama {d['bytes_trama']} B, {d['bits_s']/1e3:.1f} kb/s netos, utilizacion {100*d['utilizacion']:.1f} % a 460 800 y {100*u921:.1f} % a 921 600")
     print("\nRESULTADO:", "TODAS LAS COMPROBACIONES PASARON" if not fallos else f"FALLARON: {fallos}")
     sys.exit(1 if fallos else 0)
 

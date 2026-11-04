@@ -34,6 +34,10 @@ struct Mostrar : FrameParser::Sink {
 int main(int argc, char** argv) {
   if (argc < 2) return 1;
   if (argc > 2 && std::string(argv[1]) == "crc") { printf("%04x\n", crc16((const uint8_t*)argv[2], strlen(argv[2]))); return 0; }
+  if (argc > 4 && std::string(argv[1]) == "fmt") {            // host_link fmt adc12|q15 mid muestra
+    printf("%.6f\n", muestra_a_float(int16_t(atoi(argv[4])), std::string(argv[2]) == "q15" ? FormatoIn::Q15 : FormatoIn::Adc12, atof(argv[3])));
+    return 0;
+  }
   if (argc > 3 && std::string(argv[1]) == "seq") {          // host_link seq MOD s1 s2 ...
     SeqTracker t; const uint32_t mod = atoi(argv[2]);
     for (int i = 3; i < argc; ++i) printf("%d ", t.on_seq(atoi(argv[i]), mod));

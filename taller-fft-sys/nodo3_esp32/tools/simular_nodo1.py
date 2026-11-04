@@ -10,6 +10,7 @@ Ejemplos (desde taller-fft-sys/, con numpy, scipy y pyserial):
   python nodo3_esp32/tools/simular_nodo1.py --port /dev/ttyUSB1 --escenario P1
   python nodo3_esp32/tools/simular_nodo1.py --port /dev/ttyUSB1 --ref-port /dev/ttyUSB2 --escenario P5 --piso
   python nodo3_esp32/tools/simular_nodo1.py --out flujo.bin --escenario P2      # sin puerto: vuelca el flujo
+Formato por defecto: cuenta cruda del ADC (0..4095), como el firmware actual del Nodo 1.
 Conexion: adaptador USB-UART 3.3 V: TX -> GPIO16 (RX2) de la ESP32 del Nodo 3, GND comun.
 """
 import argparse, os, struct, sys, time
@@ -34,8 +35,9 @@ def trama_piso(sec, piso, decim=8):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--escenario", default="P1", choices=["P1", "P2", "P3", "P4", "P5", "P6"])
-    ap.add_argument("--port"); ap.add_argument("--ref-port"); ap.add_argument("--baud", type=int, default=460800)
+    ap.add_argument("--port"); ap.add_argument("--ref-port"); ap.add_argument("--baud", type=int, default=921600)
     ap.add_argument("--out", help="escribe el flujo PCM+parametros en un archivo en vez de un puerto")
+    ap.add_argument("--formato", choices=["adc12", "q15"], default="adc12", help="muestras int16: cuenta cruda del ADC (como el Nodo 1 actual) o Q15 centrado")
     ap.add_argument("--piso", action="store_true", help="envia tambien la trama PISO (extension propuesta)")
     ap.add_argument("--sin-params", action="store_true")
     ap.add_argument("--repeticiones", type=int, default=1)
@@ -50,7 +52,9 @@ def main():
     ruido = signals.escalar_para_snr(limpia, signals.generar_ruido(n=L, rng=rng, **esc["ruido"]), esc["snr_db"])
     g = PICO / max(np.abs(limpia).max(), np.abs(limpia + ruido).max())
     limpia, ruidosa = g * limpia, g * (limpia + ruido)
-    adc = np.round(signals.cuantizar(ruidosa, ADC_BITS) * 32768).astype("<i2")      # Q15
+    adc_f = signals.cuantizar(ruidosa, ADC_BITS)
+    adc = (np.round(adc_f * 2048) + 2048).astype("<i2") if a.formato == "adc12" else np.round(adc_f * 32768).astype("<i2")
+    adc_q15 = np.round(adc_f * 32768).astype("<i2")                                  # para el analisis del Nodo 1 simulado
     ref = np.round(limpia * 32768).astype("<i2")
     print(f"{a.escenario}: {esc['nombre']} | SNR de entrada {esc['snr_db']} dB | banda util {esc['banda_util']} Hz | "
           f"rango de interferencia {esc['rango_int']} Hz", file=sys.stderr)
@@ -68,7 +72,7 @@ def main():
     for rep in range(a.repeticiones):
         for i in range(N_BLOQUES):
             bloque = adc[i * N:(i + 1) * N]
-            x = bloque.astype(np.float64) / 32768.0
+            x = adc_q15[i * N:(i + 1) * N].astype(np.float64) / 32768.0
             diag = nodo1.procesar(x)
             datos = link.empaquetar(seq, bloque)
             if not a.sin_params:
@@ -76,7 +80,7 @@ def main():
                 for h in range(2):                       # receptor_fft analiza ventanas de N con avance N/2
                     ini = i * N + (h - 1) * (N // 2)
                     if ini >= 0:
-                        frec = receptor.procesar(adc[ini:ini + N].astype(np.float64) / 32768.0)
+                        frec = receptor.procesar(adc_q15[ini:ini + N].astype(np.float64) / 32768.0)
                 datos += rf.empaquetar(seq, frec)
             if a.piso:
                 datos += trama_piso(seq, diag.piso)

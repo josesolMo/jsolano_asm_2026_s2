@@ -53,6 +53,7 @@ static volatile uint32_t g_ext_par_blk = 0, g_ext_piso_blk = 0;
 static volatile bool g_ext_par_ok = false, g_ext_piso_ok = false;
 static volatile uint32_t g_blk_actual = 0, g_ext_fallback = 0;
 
+static float g_dc_in = 0;                 // media de la ultima entrada (ya escalada): debe ser ~0
 static bool g_ref_activa = false, g_stream = false, g_fuente_interna = false;
 static uint32_t g_prox_estado_ms = 0;
 
@@ -166,10 +167,12 @@ static void procesar_bloque(const Bloque& b) {
       for (int i = 0; i < perdidos; ++i) { procesar_float(g_x, nullptr); ++g_rellenados; }
     }
   }
-  for (int i = 0; i < N; ++i) g_x[i] = b.m[i] * (1.0f / 32768.0f);
+  double suma = 0;
+  for (int i = 0; i < N; ++i) { g_x[i] = muestra_a_float(b.m[i], g_p.formato, g_p.adc_mid); suma += g_x[i]; }
+  g_dc_in = float(suma / N);
   const float* ref = nullptr;
   if (g_ref_activa && g_ref_seq[b.seq & 3] == b.seq) {
-    for (int i = 0; i < N; ++i) g_s[i] = g_ref[b.seq & 3].m[i] * (1.0f / 32768.0f);
+    for (int i = 0; i < N; ++i) g_s[i] = g_ref[b.seq & 3].m[i] * (1.0f / 32768.0f);   // la referencia es siempre Q15
     ref = g_s;
   }
   procesar_float(g_x, ref);
@@ -198,11 +201,11 @@ static void generar_bloque() {
 
 // ------------------------------------------------------------------ consola
 static void imprimir_parametros() {
-  Serial.printf("alfa=%.3f beta=%.3f ginterf=%.4f notch=%d lambda=%.2f banda=%.0f-%.0f Hz rint=%.0f-%.0f Hz modo=%s diag=%s ref=%s fuente=%s\n",
+  Serial.printf("alfa=%.3f beta=%.3f ginterf=%.4f notch=%d lambda=%.2f banda=%.0f-%.0f Hz rint=%.0f-%.0f Hz modo=%s diag=%s ref=%s fuente=%s entrada=%s(mid=%.0f)\n",
                 g_p.alfa, g_p.beta, g_p.g_interf, g_p.notch_bins, g_p.lambda_ema, g_p.banda_lo, g_p.banda_hi,
                 g_p.rint_lo, g_p.rint_hi, g_p.modo == Modo::Filtro ? "filtro" : g_p.modo == Modo::Bypass ? "bypass" : "crudo",
                 g_p.fuente == FuenteDiag::Local ? "local" : "ext", g_ref_activa ? "on" : "off",
-                g_fuente_interna ? "generador" : "uart");
+                g_fuente_interna ? "generador" : "uart", g_p.formato == FormatoIn::Adc12 ? "adc12" : "q15", g_p.adc_mid);
 }
 
 static void imprimir_metricas() {
@@ -228,6 +231,7 @@ static void imprimir_estado() {
   Serial.printf("[ENLACE N1] bytes=%lu pcm_ok=%lu params=%lu piso=%lu crc_err=%lu bytes_basura=%lu\n",
                 (unsigned long)a.bytes, (unsigned long)a.pcm_ok, (unsigned long)a.params_ok, (unsigned long)a.piso_ok,
                 (unsigned long)a.crc_err, (unsigned long)a.bytes_descartados);
+  Serial.printf("[ENTRADA] DC de la ultima trama = %+.4f (escala completa 1.0; un DC alto desplaza la salida del DAC; ajuste 'set adcmid')\n", g_dc_in);
   Serial.printf("[BLOQUES] procesados=%lu perdidos=%lu rellenados=%lu repetidos=%lu resync=%lu desbordes_cola=%lu\n",
                 (unsigned long)g_bloques, (unsigned long)g_perdidos, (unsigned long)g_rellenados,
                 (unsigned long)g_repetidos, (unsigned long)g_resync, (unsigned long)g_overflow);
@@ -297,6 +301,8 @@ static void ayuda() {
     "  diag local|ext             origen del piso/interferentes (ext = tramas del Nodo 1, con respaldo local)\n"
     "  scen P1..P5                banda util y rango de interferencia del escenario\n"
     "  ref on|off                 referencia limpia por UART1 (metricas verdaderas); 'metrics reset' antes de la prueba\n"
+ "  fmt adc12|q15 | set adcmid <cuentas>   formato de la trama PCM de entrada (adc12 = cuenta cruda del Nodo 1, centro 2048)\n"
+    "  baud <n>                   velocidad de la UART2 (debe coincidir con el Nodo 1; defecto 921600)\n"
     "  src uart|gen               fuente: UART2 (Nodo 1) o generador interno\n"
     "  gen f1 a1 f2 a2 ruido      generador: dos tonos (Hz, amplitud 0-1) + ruido blanco (amplitud)\n"
     "  gain <codigos>             ganancia del DAC (127 = escala completa), dac stop|start");
@@ -324,6 +330,7 @@ static void comando(char* l) {
     else if (!strcmp(b, "lambda")) g_p.lambda_ema = constrain(v, 0.0f, 0.999f);
     else if (!strcmp(b, "notch")) g_p.notch_bins = constrain(int(v), 0, 32);
     else if (!strcmp(b, "band") && d) { g_p.banda_lo = v; g_p.banda_hi = atof(d); }
+    else if (!strcmp(b, "adcmid")) g_p.adc_mid = constrain(v, 0.0f, 4095.0f);
     else if (!strcmp(b, "rint") && d) { g_p.rint_lo = v; g_p.rint_hi = atof(d); }
     else { Serial.println("parametro desconocido"); return; }
     imprimir_parametros();
@@ -333,6 +340,12 @@ static void comando(char* l) {
   }
   else if (!strcmp(a, "diag") && b) { g_p.fuente = !strcmp(b, "ext") ? FuenteDiag::Externo : FuenteDiag::Local; imprimir_parametros(); }
   else if (!strcmp(a, "scen") && b) escenario(b);
+  else if (!strcmp(a, "fmt") && b) { g_p.formato = !strcmp(b, "q15") ? FormatoIn::Q15 : FormatoIn::Adc12; imprimir_parametros(); }
+  else if (!strcmp(a, "baud") && b) {
+    const unsigned long v = strtoul(b, nullptr, 10);
+    if (v >= 9600 && v <= 2000000) { Serial2.updateBaudRate(v); if (g_ref_activa) Serial1.updateBaudRate(v); Serial.printf("UART a %lu baud\n", v); }
+    else Serial.println("baud fuera de rango (9600..2000000)");
+  }
   else if (!strcmp(a, "ref") && b) {
     g_ref_activa = !strcmp(b, "on");
     if (g_ref_activa) { Serial1.setRxBufferSize(8192); Serial1.begin(BAUD, SERIAL_8N1, PIN_RX_REF, PIN_TX_REF); }   // GPIO18/19 solo se usan con la referencia

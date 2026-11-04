@@ -40,7 +40,7 @@ constexpr int MAX_FREQ = 8;              // frecuencias por trama de parametros
 constexpr int PISO_DECIM_MAX = 64;
 constexpr int PISO_MAX_KNOTS = 129;      // 513 bins / decimacion 4 como minimo
 constexpr size_t MAX_FRAME = 2 + 2 + 2 + 2 * N + 2;  // trama PCM completa = 2056 bytes
-constexpr uint32_t BAUD = 460800;        // ver README: 2056 B / 64 ms = 69.7 % a 460 800
+constexpr uint32_t BAUD = 921600;        // el mismo BAUD que el firmware del Nodo 1; 460 800 tambien alcanza (69.7 %)
 constexpr int POOL_BLOCKS = 4;           // bloques PCM en cola entre recepcion y proceso
 constexpr int MAX_FILL_BLOCKS = 4;       // bloques perdidos que se rellenan con ceros
 
@@ -68,6 +68,13 @@ constexpr int TEST_MUESTRAS = TEST_BLOQUES * N;
 // Modos de operacion.
 enum class Modo : uint8_t { Filtro = 0, Bypass = 1, Crudo = 2 };   // Crudo: entrada retardada HOP, sin FFT
 enum class FuenteDiag : uint8_t { Local = 0, Externo = 1 };
+// Formato de las muestras int16 de la trama PCM de entrada:
+//  Adc12: cuenta cruda del ADC del Nodo 1 (0..4095, sin signo); x = (m - adc_mid) / 2048   [firmware actual del Nodo 1]
+//  Q15  : entero con signo centrado en 0; x = m / 32768                                  [link.py / simulacion]
+enum class FormatoIn : uint8_t { Adc12 = 0, Q15 = 1 };
+inline float muestra_a_float(int16_t m, FormatoIn f, float adc_mid) {
+  return f == FormatoIn::Adc12 ? (float(m) - adc_mid) * (1.0f / 2048.0f) : float(m) * (1.0f / 32768.0f);
+}
 
 // Parametros ajustables en ejecucion.
 struct Params {
@@ -80,6 +87,8 @@ struct Params {
   float lambda_ema = LAMBDA_EMA;
   Modo modo = Modo::Filtro;
   FuenteDiag fuente = FuenteDiag::Local;
+  FormatoIn formato = FormatoIn::Adc12;
+  float adc_mid = 2048.0f;
 };
 
 }  // namespace n3

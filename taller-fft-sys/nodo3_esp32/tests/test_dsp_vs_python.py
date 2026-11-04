@@ -10,13 +10,14 @@ import numpy as np
 
 RAIZ = Path(__file__).resolve().parents[2]
 FW = RAIZ / "nodo3_esp32"
-sys.path.insert(0, str(RAIZ / "full_system"))
+sys.path.insert(0, str(RAIZ)); sys.path.insert(0, str(RAIZ / "full_system"))
 os.chdir(RAIZ.parent)                         # config.py crea taller-fft-sys/resultados_sistema relativo a la raiz
 from sistema_ruido.config import N, HOP, L, N_BLOQUES, FS, ADC_BITS, PICO  # noqa: E402
 from sistema_ruido import scenarios, signals                                # noqa: E402
 from sistema_ruido.acquisition import NodoAdquisicion                        # noqa: E402
 from sistema_ruido.spectral import NodoEspectral                             # noqa: E402
 from sistema_ruido.metrics import metricas                                   # noqa: E402
+from receptor_fft.src import receptor_fft as rf                              # noqa: E402
 
 TMP = Path(tempfile.mkdtemp(prefix="nodo3_"))
 BIN = TMP / "host_dsp"
@@ -103,11 +104,15 @@ def volcar_diag(diags, ruta):
 
 
 filas_aten = []
+filas8 = []
 
 
 def prueba_escenario(pid, filas):
     esc, limpia, adc = senal_escenario(pid)
     x16 = a_i16(adc)
+    raw12 = (np.round(adc * 2048) + 2048)                       # lo que envia hoy el Nodo 1 (ADC de 12 bits sin signo)
+    chequeo(f"P5 {pid} cuenta cruda del ADC (0..4095) -> escala +-1", raw12.min() >= 0 and raw12.max() <= 4095
+            and np.array_equal((raw12 - 2048) / 2048, adc), f"rango de cuentas [{int(raw12.min())}, {int(raw12.max())}], conversion exacta")
     # --- referencia Python (float64) con diagnostico del Nodo 1 (Python) ---
     nodo1, esp, diags, ref_out = NodoAdquisicion(esc["banda_util"]), NodoEspectral(), [], []
     xs = x16.astype(np.float64) / 32768.0                       # lo que realmente recibe el Nodo 3
@@ -159,11 +164,36 @@ def prueba_escenario(pid, filas):
     chequeo(f"EXT {pid} trama PISO (65 nudos, 130 B) vs piso completo", abs(mk["dsnr"] - mq["dsnr"]) < 0.5,
             f"dSNR completo={mq['dsnr']:.2f} dB, con nudos={mk['dsnr']:.2f} dB (dif {mk['dsnr'] - mq['dsnr']:+.2f})")
 
+    # (b3) interferentes tal como los reporta la trama PARAMS REAL del Nodo 1 (receptor_fft.py), que no
+    # aplica el criterio de 40 dB de acquisition.py. Informativo: cuantifica la discrepancia entre modulos.
+    rec = rf.Receptor(banda_util=esc["banda_util"]); lista = []
+    for i in range(N_BLOQUES):
+        fr = []
+        for h in range(2):
+            ini = i * N + (h - 1) * HOP
+            if ini >= 0:
+                fr = rec.procesar(xs[ini:ini + N])
+        lista.append(fr)
+    kn2 = TMP / f"{pid}.knots2"
+    with open(kn2, "wb") as f:
+        for d, fr in zip(diags, lista):
+            cdb = np.round(100 * 10 * np.log10(np.maximum(d.piso[::8], 1e-30))).astype("<i2")
+            f.write(bytes([8, len(cdb)]) + cdb.tobytes() + bytes([len(fr)]))
+            for q_ in fr:
+                f.write(np.float32(round(q_["f_hz"] * 4) / 4).tobytes() + bytes([q_["flags"]]))
+    y_k2 = correr("knots", x16, [str(kn2), str(TMP / "k2.f32")], TMP / "k2.f32")
+    m2 = metricas(limpia, adc, q(y_k2[HOP:HOP + L], 12), esc)
+    n_rf = np.mean([sum(1 for q_ in fr if q_["flags"] & 1) for fr in lista]); n_py = np.mean([len(d.interf) for d in diags])
+    print(f"[INFO] EXT {pid} interferentes de PARAMS real (receptor_fft) {n_rf:.1f}/bloque vs acquisition.py {n_py:.1f}/bloque: "
+          f"dSNR {m2['dsnr']:.2f} dB vs {mq['dsnr']:.2f} dB, E_util {m2['e_util']:.1f} % vs {mq['e_util']:.1f} %")
+
     # (c) metricas del proyecto sobre la salida del C++ (retardo HOP ya descartado)
     sal_cpp = y_loc[HOP:HOP + L]; sal_py = ref_out[HOP:HOP + L]
     # cuantizacion de salida a 12 bits como en pipeline.py, para comparar con sus tablas
     m_cpp = metricas(limpia, adc, q(sal_cpp, 12), esc); m_py = metricas(limpia, adc, q(sal_py, 12), esc)
     filas.append((pid, m_py, m_cpp))
+    m8 = metricas(limpia, adc, q(sal_cpp, 8), esc)      # salida limitada por el DAC real de 8 bits
+    filas8.append((pid, m8))
 
     # (d) clase Metrics del firmware (modo con referencia) contra metrics.metricas, ambos sin cuantizar la salida
     (TMP / "ref.f32").write_bytes(limpia.astype("<f4").tobytes())
@@ -193,6 +223,10 @@ if __name__ == "__main__":
     for pid, a, b in filas:
         print(f"{pid}  {a['mse']:.3e}  {b['mse']:.3e}  {a['snr_in']:6.2f}  {a['snr_out']:8.2f}  {b['snr_out']:9.2f}  "
               f"{a['dsnr']:7.2f}  {b['dsnr']:8.2f}  {a['e_util']:8.1f}  {b['e_util']:8.1f}  {a['atenuacion']:6.1f}  {b['atenuacion']:6.1f}")
+    print("\nEfecto del DAC real de 8 bits (el prototipo asume 12): salida del C++ cuantizada a 8 bits")
+    print("ID  SNRout(12b)  SNRout(8b)  dSNR(8b)  MSE(8b)")
+    for (pid, _, b), (_, m8) in zip(filas, filas8):
+        print(f"{pid}  {b['snr_out']:9.2f}  {m8['snr_out']:9.2f}  {m8['dsnr']:8.2f}  {m8['mse']:.3e}")
     print("\nSin referencia (estimaciones del firmware) frente a las verdaderas con referencia:")
     print("ID  Aten(py,senal completa)  Aten(fw,espectral)  UtilConserv(fw)  SNRin_est  SNRin_verd  SNRout_est  SNRout_verd")
     for pid, a_py, a_fw, u, si, so, vi, vo in filas_aten:
