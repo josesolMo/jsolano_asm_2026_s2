@@ -1,120 +1,171 @@
-#pragma once
-#include <cstddef>
-#include <cstdint>
+// Nodo 1: adquisicion y analisis en el ESP32-S3.
+//
+// Placa: ESP32-S3 (Arduino-ESP32 3.3.12, "ESP32S3 Dev Module").
+// Entrada: GPIO4 = ADC1, canal 3, atenuacion de 12 dB (0 a ~3.1 V).
+//
+// Cada 1024 muestras (64 ms) envia una trama con las muestras crudas (formato
+// link.py). Cada 512 muestras (32 ms) analiza los ultimos 1024 valores (50 % de
+// solapamiento): quita DC, Hann, FFT, piso de ruido y criterios C1-C5
+// (receptor.h), y envia una trama de diagnostico con las frecuencias validadas.
+//
+// Comandos por el monitor serial (una letra):
+//   e  estado (texto)     f  enviar el espectro del proximo bloque (validar la FFT)
+//
+// En la PC: python nodo1_esp32s3/validar_nodo1.py --puerto COMx
 
-// Formato de trama del enlace, identico a full_system/sistema_ruido/link.py:
-//   [A5 5A][secuencia u16][n u16][n x int16][CRC-16 de secuencia+n+datos]
-// Todo en little-endian. Esta cabecera no depende de Arduino para poder
-// probarla tambien en la computadora (validacion/probar_trama.py).
-namespace trama {
-constexpr uint8_t SYNC0 = 0xA5;
-constexpr uint8_t SYNC1 = 0x5A;
-constexpr size_t ENCABEZADO = 6;   // SYNC(2) + secuencia(2) + n(2)
-constexpr size_t CRC_BYTES = 2;
+#include <Arduino.h>
+#include <cstring>
+#include "esp_adc/adc_continuous.h"
+#include "trama.h"
+#include "receptor.h"
 
-// Bytes que ocupa una trama con n muestras.
-constexpr size_t tamano(size_t n) { return ENCABEZADO + 2 * n + CRC_BYTES; }
+// Fijar la placa evita compilar por error para el ESP32 clasico del emisor.
+#if !CONFIG_IDF_TARGET_ESP32S3
+#error "Seleccione la placa ESP32S3 Dev Module."
+#endif
 
-// CRC-16/CCITT-FALSE: polinomio 0x1021, valor inicial 0xFFFF (igual que link.py).
-inline uint16_t crc16(const uint8_t* datos, size_t largo, uint16_t crc = 0xFFFF) {
-    for (size_t i = 0; i < largo; ++i) {
-        crc ^= static_cast<uint16_t>(datos[i]) << 8;
-        for (int b = 0; b < 8; ++b) {
-            crc = (crc & 0x8000) ? static_cast<uint16_t>((crc << 1) ^ 0x1021)
-                                 : static_cast<uint16_t>(crc << 1);
+constexpr uint32_t FS = 16000;          // Hz, igual que el emisor y la simulacion
+constexpr size_t N = nodo1::N;          // 1024 muestras por trama y por analisis
+constexpr size_t SALTO = nodo1::SALTO;  // un analisis cada 512 muestras nuevas
+constexpr adc_channel_t CANAL = ADC_CHANNEL_3;   // GPIO4 en el ESP32-S3
+constexpr uint32_t BAUD = 921600;       // se ignora si la placa usa USB nativo (CDC)
+
+// Cada resultado del ADC continuo ocupa SOC_ADC_DIGI_RESULT_BYTES (4 en el S3).
+constexpr size_t BYTES_RESULTADO = SOC_ADC_DIGI_RESULT_BYTES;
+constexpr size_t RESULTADOS_POR_LECTURA = 256;               // 16 ms de senal
+constexpr size_t BYTES_LECTURA = RESULTADOS_POR_LECTURA * BYTES_RESULTADO;
+
+adc_continuous_handle_t adc = nullptr;
+uint8_t crudo[BYTES_LECTURA];           // lo que entrega el DMA en cada lectura
+
+// Ruta de muestras: trama de 1024 codigos de 12 bits.
+int16_t bloque[N];
+size_t llenas = 0;
+uint16_t secuencia = 0;
+uint8_t salidaMuestras[trama::tamano(N)];
+
+// Ruta de analisis: los ultimos N valores en [0, 1] y el receptor.
+float ventana[N];
+size_t enVentana = 0;                   // cuantas muestras validas hay (hasta N)
+uint32_t analisis = 0;
+nodo1::Receptor receptor;               // global: ~26 KB, no cabe en la pila de loop()
+uint8_t salidaDiagnostico[trama::tamanoDiagnostico(nodo1::MAX_REPORTADAS)];
+uint8_t salidaEspectro[trama::tamanoEspectro(N)];
+bool pedirEspectro = false;
+uint32_t tMaxUs = 0;                    // peor tiempo de analisis observado
+
+// El driver llama esto en interrupcion cuando su almacen interno se llena porque
+// el programa no leyo a tiempo: se pierden muestras y hay que reportarlo.
+volatile uint32_t desbordes = 0;
+static bool IRAM_ATTR alDesbordar(adc_continuous_handle_t, const adc_continuous_evt_data_t*,
+                                  void*) {
+    desbordes = desbordes + 1;
+    return false;
+}
+
+void iniciarAdc() {
+    // Almacen de 8 lecturas (128 ms): margen mientras se analiza y se envia.
+    adc_continuous_handle_cfg_t manejador = {};
+    manejador.max_store_buf_size = 8 * BYTES_LECTURA;
+    manejador.conv_frame_size = BYTES_LECTURA;
+    ESP_ERROR_CHECK(adc_continuous_new_handle(&manejador, &adc));
+
+    // Un solo canal: todas las conversiones son de GPIO4, a FS exacta.
+    adc_digi_pattern_config_t patron = {};
+    patron.atten = ADC_ATTEN_DB_12;
+    patron.channel = CANAL;
+    patron.unit = ADC_UNIT_1;
+    patron.bit_width = SOC_ADC_DIGI_MAX_BITWIDTH;
+
+    adc_continuous_config_t config = {};
+    config.pattern_num = 1;
+    config.adc_pattern = &patron;
+    config.sample_freq_hz = FS;
+    config.conv_mode = ADC_CONV_SINGLE_UNIT_1;
+    config.format = ADC_DIGI_OUTPUT_FORMAT_TYPE2;
+    ESP_ERROR_CHECK(adc_continuous_config(adc, &config));
+
+    adc_continuous_evt_cbs_t eventos = {};
+    eventos.on_pool_ovf = alDesbordar;
+    ESP_ERROR_CHECK(adc_continuous_register_event_callbacks(adc, &eventos, nullptr));
+    ESP_ERROR_CHECK(adc_continuous_start(adc));
+}
+
+void setup() {
+    // El bufer de envio debe fijarse antes de begin(); cabe la trama de espectro.
+    Serial.setTxBufferSize(sizeof(salidaEspectro) + sizeof(salidaMuestras));
+    Serial.begin(BAUD);
+    iniciarAdc();
+}
+
+// Los comandos se atienden entre lecturas; el script de la PC ignora el texto.
+void atenderComandos() {
+    while (Serial.available()) {
+        const char c = Serial.read();
+        if (c == 'e') {
+            Serial.printf("\n#estado fs=%lu N=%u tramas=%u analisis=%lu desbordes=%lu "
+                          "t_max_us=%lu pistas_descartadas=%lu\n",
+                          static_cast<unsigned long>(FS), static_cast<unsigned>(N),
+                          static_cast<unsigned>(secuencia), static_cast<unsigned long>(analisis),
+                          static_cast<unsigned long>(desbordes), static_cast<unsigned long>(tMaxUs),
+                          static_cast<unsigned long>(receptor.pistas_descartadas));
+        } else if (c == 'f') {
+            pedirEspectro = true;
         }
     }
-    return crc;
 }
 
-// Escribe un entero de 16 bits en little-endian.
-inline void poner16(uint8_t* destino, uint16_t valor) {
-    destino[0] = static_cast<uint8_t>(valor & 0xFF);
-    destino[1] = static_cast<uint8_t>(valor >> 8);
-}
+// Analiza los ultimos N valores y envia el diagnostico (y el espectro si se pidio).
+void analizar() {
+    const uint32_t t0 = micros();
+    receptor.analizar(ventana);
+    const uint32_t t = micros() - t0;
+    if (t > tMaxUs) tMaxUs = t;
 
-// Arma la trama en 'destino' (debe tener tamano(n) bytes) y devuelve su largo.
-inline size_t empaquetar(uint16_t secuencia, const int16_t* muestras, size_t n,
-                         uint8_t* destino) {
-    destino[0] = SYNC0;
-    destino[1] = SYNC1;
-    poner16(destino + 2, secuencia);
-    poner16(destino + 4, static_cast<uint16_t>(n));
-    for (size_t i = 0; i < n; ++i) {
-        poner16(destino + ENCABEZADO + 2 * i, static_cast<uint16_t>(muestras[i]));
+    const size_t largo = trama::empaquetarDiagnostico(
+        analisis, static_cast<uint16_t>(t > 65535 ? 65535 : t),
+        receptor.validadas, static_cast<size_t>(receptor.n_validadas), salidaDiagnostico);
+    Serial.write(salidaDiagnostico, largo);
+
+    if (pedirEspectro) {
+        pedirEspectro = false;
+        const size_t l = trama::empaquetarEspectro(analisis, ventana, receptor.potencia, N,
+                                                   salidaEspectro);
+        Serial.write(salidaEspectro, l);
     }
-    // El CRC cubre secuencia, n y datos; el SYNC queda fuera, como en link.py.
-    const size_t cuerpo = 4 + 2 * n;
-    poner16(destino + ENCABEZADO + 2 * n, crc16(destino + 2, cuerpo));
-    return tamano(n);
+    ++analisis;
 }
 
-inline void poner32(uint8_t* destino, uint32_t valor) {
-    poner16(destino, static_cast<uint16_t>(valor & 0xFFFF));
-    poner16(destino + 2, static_cast<uint16_t>(valor >> 16));
-}
-
-// Cierra una trama cuyo cuerpo ocupa 'cuerpo' bytes despues del SYNC: agrega el CRC.
-inline size_t cerrar(uint8_t* destino, uint8_t sync1, size_t cuerpo) {
-    destino[0] = SYNC0;
-    destino[1] = sync1;
-    poner16(destino + 2 + cuerpo, crc16(destino + 2, cuerpo));
-    return 2 + cuerpo + CRC_BYTES;
-}
-
-// Trama de diagnostico (una por bloque analizado, cada 32 ms):
-//   [A5 5B][analisis u32][t_us u16][n u8][0 u8]
-//   n x [f*4 u16][amplitud*10000 u16][snr*10 i16][flags u8]   [CRC-16]
-// El SYNC distinto (5B) hace que el lector de muestras de link.py la ignore.
-constexpr uint8_t SYNC_DIAGNOSTICO = 0x5B;
-constexpr size_t BYTES_FRECUENCIA = 7;
-constexpr size_t tamanoDiagnostico(size_t n) { return 2 + 8 + BYTES_FRECUENCIA * n + CRC_BYTES; }
-
-inline uint16_t saturar16(float v, float lo, float hi) {
-    if (v < lo) v = lo;
-    if (v > hi) v = hi;
-    return static_cast<uint16_t>(static_cast<int32_t>(v + (v >= 0 ? 0.5f : -0.5f)));
-}
-
-template <typename Frecuencia>
-inline size_t empaquetarDiagnostico(uint32_t analisis, uint16_t t_us, const Frecuencia* f,
-                                    size_t n, uint8_t* destino) {
-    uint8_t* p = destino + 2;
-    poner32(p, analisis);
-    poner16(p + 4, t_us);
-    p[6] = static_cast<uint8_t>(n);
-    p[7] = 0;
-    p += 8;
-    for (size_t i = 0; i < n; ++i) {
-        poner16(p, saturar16(f[i].f_hz * 4.0f, 0.0f, 65535.0f));
-        poner16(p + 2, saturar16(f[i].amplitud * 10000.0f, 0.0f, 65535.0f));
-        poner16(p + 4, saturar16(f[i].snr_db * 10.0f, -32768.0f, 32767.0f));
-        p[6] = f[i].flags;
-        p += BYTES_FRECUENCIA;
+// Cada muestra va a las dos rutas: la trama de muestras y la ventana de analisis.
+void agregarMuestra(uint16_t codigo) {
+    bloque[llenas++] = static_cast<int16_t>(codigo);
+    if (llenas == N) {
+        const size_t largo = trama::empaquetar(secuencia++, bloque, N, salidaMuestras);
+        Serial.write(salidaMuestras, largo);
+        llenas = 0;
     }
-    return cerrar(destino, SYNC_DIAGNOSTICO, 8 + BYTES_FRECUENCIA * n);
+
+    // El analisis a cubre las muestras [512 a, 512 a + 1024): con la ventana llena
+    // se analiza y se conservan las ultimas 512 para el siguiente (50 % de solapamiento).
+    ventana[enVentana++] = codigo / 4095.0f;
+    if (enVentana == N) {
+        analizar();
+        std::memmove(ventana, ventana + SALTO, (N - SALTO) * sizeof(float));
+        enVentana = N - SALTO;
+    }
 }
 
-// Trama de espectro (solo a pedido, para validar la FFT contra numpy):
-//   [A5 5C][analisis u32][N u16][N x float32 entrada][(N/2+1) x float32 |X|^2][CRC-16]
-constexpr uint8_t SYNC_ESPECTRO = 0x5C;
-constexpr size_t tamanoEspectro(size_t n) { return 2 + 6 + 4 * n + 4 * (n / 2 + 1) + CRC_BYTES; }
+void loop() {
+    atenderComandos();
 
-inline size_t empaquetarEspectro(uint32_t analisis, const float* x, const float* potencia,
-                                 size_t n, uint8_t* destino) {
-    uint8_t* p = destino + 2;
-    poner32(p, analisis);
-    poner16(p + 4, static_cast<uint16_t>(n));
-    p += 6;
-    // Los float32 se copian byte a byte: ESP32 y PC son little-endian e IEEE 754.
-    for (size_t i = 0; i < n; ++i, p += 4) {
-        const uint8_t* b = reinterpret_cast<const uint8_t*>(&x[i]);
-        p[0] = b[0]; p[1] = b[1]; p[2] = b[2]; p[3] = b[3];
+    uint32_t leidos = 0;
+    // Espera hasta 100 ms por una lectura; con 16 kHz llega una cada 16 ms.
+    if (adc_continuous_read(adc, crudo, BYTES_LECTURA, &leidos, 100) != ESP_OK) return;
+
+    for (uint32_t i = 0; i + BYTES_RESULTADO <= leidos; i += BYTES_RESULTADO) {
+        const adc_digi_output_data_t* r = reinterpret_cast<const adc_digi_output_data_t*>(crudo + i);
+        // Se descarta cualquier resultado que no sea del canal configurado.
+        if (r->type2.unit != 0 || r->type2.channel != CANAL) continue;
+        agregarMuestra(r->type2.data);
     }
-    for (size_t k = 0; k < n / 2 + 1; ++k, p += 4) {
-        const uint8_t* b = reinterpret_cast<const uint8_t*>(&potencia[k]);
-        p[0] = b[0]; p[1] = b[1]; p[2] = b[2]; p[3] = b[3];
-    }
-    return cerrar(destino, SYNC_ESPECTRO, 6 + 4 * n + 4 * (n / 2 + 1));
 }
-}  // namespace trama
