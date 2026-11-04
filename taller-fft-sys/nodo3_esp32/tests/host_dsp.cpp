@@ -59,6 +59,19 @@ int main(int argc, char** argv) {
       for (int h = 0; h < 2; ++h) { float y[HOP]; nodo.advance(x + h * HOP, &d, p, y); out.insert(out.end(), y, y + HOP); }
     }
     escribir_f32(argv[4], out);
+  } else if (!strcmp(cmd, "knots")) {
+    // knots in.i16 diag.bin out.f32 : diagnostico por bloque como lo recibiria del Nodo 1:
+    //   u8 decim, u8 nk, i16 centi_db[nk], u8 n, n x (f32 f_hz, u8 flags)
+    FILE* fd = fopen(argv[3], "rb"); if (!fd) { perror("diag"); return 2; }
+    for (size_t b = 0; b < nb; ++b) {
+      static Diag d; uint8_t decim, nk, n; int16_t cdb[PISO_MAX_KNOTS]; float f[MAX_FREQ]; uint8_t fl[MAX_FREQ];
+      if (fread(&decim, 1, 1, fd) != 1 || fread(&nk, 1, 1, fd) != 1 || fread(cdb, 2, nk, fd) != nk || fread(&n, 1, 1, fd) != 1) return 2;
+      for (int i = 0; i < n; ++i) if (fread(&f[i], 4, 1, fd) != 1 || fread(&fl[i], 1, 1, fd) != 1) return 2;
+      diag_set_piso_knots(d, cdb, nk, decim); diag_set_interf_hz(d, f, fl, n);
+      float x[N]; for (int i = 0; i < N; ++i) x[i] = in[b * N + i] / 32768.0f;
+      for (int h = 0; h < 2; ++h) { float y[HOP]; nodo.advance(x + h * HOP, &d, p, y); out.insert(out.end(), y, y + HOP); }
+    }
+    escribir_f32(argv[4], out);
   } else if (!strcmp(cmd, "metr")) {
     // metr in.i16 ref.f32 banda_lo banda_hi rint_lo rint_hi : imprime el Reporte de Metrics
     DiagLocal dl; dl.begin(); Metrics m; m.reset();

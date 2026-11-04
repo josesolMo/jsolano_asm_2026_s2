@@ -118,6 +118,7 @@ def prueba_escenario(pid, filas):
     ref_out = np.concatenate(ref_out)
     dfile = TMP / f"{pid}.diag"; volcar_diag(diags, dfile)
 
+    q = signals.cuantizar
     # (a) solo el filtro, con el diagnostico de Python
     y_ext = correr("ext", x16, [str(dfile), str(TMP / "e.f32")], TMP / "e.f32")
     e_ext = np.max(np.abs(y_ext - ref_out))
@@ -144,10 +145,23 @@ def prueba_escenario(pid, filas):
     e_loc = np.max(np.abs(y_loc - ref_out))
     chequeo(f"P5 {pid} salida (diag local) vs Python", e_loc < 5e-3, f"error abs max = {e_loc:.2e}")
 
+    # (b2) extension propuesta: piso submuestreado (decim 8, centi-dB) + frecuencias de interferentes
+    kn = TMP / f"{pid}.knots"
+    with open(kn, "wb") as f:
+        for d in diags:
+            cdb = np.round(100 * 10 * np.log10(np.maximum(d.piso[::8], 1e-30))).astype("<i2")
+            f.write(bytes([8, len(cdb)]) + cdb.tobytes() + bytes([len(d.interf)]))
+            for b_ in d.interf:
+                f.write(np.float32(round(b_ * 15.625 * 4) / 4).tobytes() + bytes([1]))
+    y_kn = correr("knots", x16, [str(kn), str(TMP / "k.f32")], TMP / "k.f32")
+    sk = q(y_kn[HOP:HOP + L], 12); sp = q(ref_out[HOP:HOP + L], 12)
+    mk = metricas(limpia, adc, sk, esc); mq = metricas(limpia, adc, sp, esc)
+    chequeo(f"EXT {pid} trama PISO (65 nudos, 130 B) vs piso completo", abs(mk["dsnr"] - mq["dsnr"]) < 0.5,
+            f"dSNR completo={mq['dsnr']:.2f} dB, con nudos={mk['dsnr']:.2f} dB (dif {mk['dsnr'] - mq['dsnr']:+.2f})")
+
     # (c) metricas del proyecto sobre la salida del C++ (retardo HOP ya descartado)
     sal_cpp = y_loc[HOP:HOP + L]; sal_py = ref_out[HOP:HOP + L]
     # cuantizacion de salida a 12 bits como en pipeline.py, para comparar con sus tablas
-    q = signals.cuantizar
     m_cpp = metricas(limpia, adc, q(sal_cpp, 12), esc); m_py = metricas(limpia, adc, q(sal_py, 12), esc)
     filas.append((pid, m_py, m_cpp))
 
