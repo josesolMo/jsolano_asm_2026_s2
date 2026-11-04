@@ -8,9 +8,11 @@
 #define NODO3_HOST 1
 #endif
 #include "../spectral_filter.h"
+#include "../metrics.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <vector>
+#include <algorithm>
 #include <string.h>
 using namespace n3;
 
@@ -57,6 +59,28 @@ int main(int argc, char** argv) {
       for (int h = 0; h < 2; ++h) { float y[HOP]; nodo.advance(x + h * HOP, &d, p, y); out.insert(out.end(), y, y + HOP); }
     }
     escribir_f32(argv[4], out);
+  } else if (!strcmp(cmd, "metr")) {
+    // metr in.i16 ref.f32 banda_lo banda_hi rint_lo rint_hi : imprime el Reporte de Metrics
+    DiagLocal dl; dl.begin(); Metrics m; m.reset();
+    p.banda_lo = atof(argv[4]); p.banda_hi = atof(argv[5]); p.rint_lo = atof(argv[6]); p.rint_hi = atof(argv[7]);
+    FILE* fr = fopen(argv[3], "rb"); std::vector<float> ref(in.size());
+    if (fread(ref.data(), 4, ref.size(), fr) != ref.size()) return 2;
+    fclose(fr);
+    for (size_t b = 0; b < nb; ++b) {
+      static Diag d; float x[N]; for (int i = 0; i < N; ++i) x[i] = in[b * N + i] / 32768.0f;
+      dl.process(x, p, d);
+      for (int h = 0; h < 2; ++h) {
+        float y[HOP]; HopStats hs; nodo.advance(x + h * HOP, &d, p, y, &hs); m.on_hop(hs);
+        out.insert(out.end(), y, y + HOP);
+      }
+    }
+    std::vector<float> xs(in.size()); for (size_t i = 0; i < in.size(); ++i) xs[i] = in[i] / 32768.0f;
+    for (size_t t = 0; t + HOP < out.size() && t < in.size(); t += HOP)       // salida alineada: y[t] = out[t+HOP]
+      m.on_samples(ref.data() + t, xs.data() + t, out.data() + t + HOP, int(std::min<size_t>(HOP, in.size() - t)));
+    Reporte r = m.reporte();
+    printf("mse=%.9e snr_in=%.6f snr_out=%.6f dsnr=%.6f e_util=%.6f aten=%.6f util=%.6f snr_est_in=%.6f snr_est_out=%.6f red_piso=%.6f muestras=%u\n",
+           r.mse, r.snr_in, r.snr_out, r.dsnr, r.e_util, r.atenuacion_rng_db, r.util_conservada_pct,
+           r.snr_est_in_db, r.snr_est_out_db, r.reduccion_piso_db, r.ref_muestras);
   } else if (!strcmp(cmd, "local")) {
     DiagLocal dl; dl.begin();
     p.banda_lo = atof(argv[4]); p.banda_hi = atof(argv[5]);

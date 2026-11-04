@@ -25,7 +25,7 @@ fallos = []
 
 def compilar():
     cmd = ["g++", "-std=c++17", "-O2", "-Wall", "-Wextra", "-DNODO3_HOST", "-o", str(BIN),
-           str(FW / "tests/host_dsp.cpp"), str(FW / "spectral_filter.cpp"), str(FW / "fft_processing.cpp")]
+           str(FW / "tests/host_dsp.cpp"), str(FW / "spectral_filter.cpp"), str(FW / "fft_processing.cpp"), str(FW / "metrics.cpp")]
     subprocess.run(cmd, check=True)
 
 
@@ -102,6 +102,9 @@ def volcar_diag(diags, ruta):
                     + np.asarray(d.interf, "<u2").tobytes())
 
 
+filas_aten = []
+
+
 def prueba_escenario(pid, filas):
     esc, limpia, adc = senal_escenario(pid)
     x16 = a_i16(adc)
@@ -147,6 +150,19 @@ def prueba_escenario(pid, filas):
     q = signals.cuantizar
     m_cpp = metricas(limpia, adc, q(sal_cpp, 12), esc); m_py = metricas(limpia, adc, q(sal_py, 12), esc)
     filas.append((pid, m_py, m_cpp))
+
+    # (d) clase Metrics del firmware (modo con referencia) contra metrics.metricas, ambos sin cuantizar la salida
+    (TMP / "ref.f32").write_bytes(limpia.astype("<f4").tobytes())
+    ent = TMP / "in_m.i16"; x16.tofile(ent)
+    sal = subprocess.run([str(BIN), "metr", str(ent), str(TMP / "ref.f32"), *map(str, esc["banda_util"]),
+                          *map(str, esc["rango_int"])], check=True, capture_output=True, text=True).stdout
+    mc = {k: float(v) for k, v in (kv.split("=") for kv in sal.split())}
+    mp = metricas(limpia, adc, sal_py, esc)
+    ok = (abs(mc["snr_out"] - mp["snr_out"]) < 0.01 and abs(mc["snr_in"] - mp["snr_in"]) < 0.01
+          and abs(mc["e_util"] - mp["e_util"]) < 0.05 and abs(mc["mse"] / mp["mse"] - 1) < 1e-3)
+    chequeo(f"P5 {pid} Metrics (C++) == metricas() (Python)", ok,
+            f"SNRout {mc['snr_out']:.3f}/{mp['snr_out']:.3f} dB, MSE {mc['mse']:.3e}/{mp['mse']:.3e}, Eutil {mc['e_util']:.2f}/{mp['e_util']:.2f} %")
+    filas_aten.append((pid, mp["atenuacion"], mc["aten"], mc["util"], mc["snr_est_in"], mc["snr_est_out"], mp["snr_in"], mp["snr_out"]))
     chequeo(f"P5 {pid} dSNR C++ ~ Python", abs(m_cpp["dsnr"] - m_py["dsnr"]) < 0.2,
             f"dSNR py={m_py['dsnr']:.2f} dB, c++={m_cpp['dsnr']:.2f} dB")
 
@@ -163,5 +179,9 @@ if __name__ == "__main__":
     for pid, a, b in filas:
         print(f"{pid}  {a['mse']:.3e}  {b['mse']:.3e}  {a['snr_in']:6.2f}  {a['snr_out']:8.2f}  {b['snr_out']:9.2f}  "
               f"{a['dsnr']:7.2f}  {b['dsnr']:8.2f}  {a['e_util']:8.1f}  {b['e_util']:8.1f}  {a['atenuacion']:6.1f}  {b['atenuacion']:6.1f}")
+    print("\nSin referencia (estimaciones del firmware) frente a las verdaderas con referencia:")
+    print("ID  Aten(py,senal completa)  Aten(fw,espectral)  UtilConserv(fw)  SNRin_est  SNRin_verd  SNRout_est  SNRout_verd")
+    for pid, a_py, a_fw, u, si, so, vi, vo in filas_aten:
+        print(f"{pid}  {a_py:20.1f} dB  {a_fw:15.1f} dB  {u:12.1f} %  {si:8.1f}   {vi:9.1f}   {so:9.1f}   {vo:10.1f}")
     print("\nRESULTADO:", "TODAS LAS COMPROBACIONES PASARON" if not fallos else f"FALLARON: {fallos}")
     sys.exit(1 if fallos else 0)
