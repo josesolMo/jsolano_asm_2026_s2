@@ -42,6 +42,7 @@ struct LinkStats {
 class FrameParser {
  public:
   struct Sink {
+    // 'muestras' apunta al buffer interno: copiar antes de volver.
     virtual void on_pcm(uint16_t seq, const int16_t* muestras) = 0;
     virtual void on_params(const ParamsFrame&) {}
     virtual void on_piso(const PisoFrame&) {}
@@ -54,7 +55,7 @@ class FrameParser {
   void step(Sink& sink);
   void drop(size_t n, bool descartar = true);
   size_t expected() const;        // 0 = tipo desconocido, SIZE_MAX = faltan bytes
-  uint8_t buf_[MAX_FRAME];
+  alignas(4) uint8_t buf_[MAX_FRAME];
   size_t len_ = 0;
   LinkStats st_;
 };

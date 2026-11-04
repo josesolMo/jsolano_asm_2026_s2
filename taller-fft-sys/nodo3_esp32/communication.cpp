@@ -61,10 +61,8 @@ void FrameParser::step(Sink& sink) {
     if (total == MAX_FRAME) {                  // PCM: el CRC cubre seq+n+datos
       ok = crc16(buf_ + 2, total - 4) == rd16(buf_ + total - 2);
       if (ok) {
-        int16_t m[N];
-        memcpy(m, buf_ + 6, sizeof m);        // little-endian nativo en ESP32 y x86
-        ++st_.pcm_ok;
-        sink.on_pcm(rd16(buf_ + 2), m);
+        ++st_.pcm_ok;                          // little-endian nativo en ESP32 y x86; buf_ alineado a 4
+        sink.on_pcm(rd16(buf_ + 2), reinterpret_cast<const int16_t*>(buf_ + 6));
       }
     } else if (buf_[2] == TIPO_PARAMS) {
       ok = crc16(buf_, total - 2) == rd16(buf_ + total - 2);
