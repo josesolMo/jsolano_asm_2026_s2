@@ -10,6 +10,8 @@
 //
 // Comandos por el monitor serial (una letra):
 //   e  estado (texto)     f  enviar el espectro del proximo bloque (validar la FFT)
+//   t  encender/apagar un tono de prueba de 1000 Hz (PWM) en GPIO5; con un jumper
+//      GPIO5 -> GPIO4 la placa se mide a si misma sin otro equipo
 //
 // En la PC: python nodo1_esp32s3/validar_nodo1.py --puerto COMx
 
@@ -29,6 +31,8 @@ constexpr size_t N = nodo1::N;          // 1024 muestras por trama y por analisi
 constexpr size_t SALTO = nodo1::SALTO;  // un analisis cada 512 muestras nuevas
 constexpr adc_channel_t CANAL = ADC_CHANNEL_3;   // GPIO4 en el ESP32-S3
 constexpr uint32_t BAUD = 921600;       // se ignora si la placa usa USB nativo (CDC)
+constexpr uint8_t PIN_PRUEBA = 5;       // GPIO5, al lado de GPIO4 en la placa
+constexpr uint32_t F_PRUEBA = 1000;     // Hz; el PWM sale del reloj de 80 MHz (preciso)
 
 // Cada resultado del ADC continuo ocupa SOC_ADC_DIGI_RESULT_BYTES (4 en el S3).
 constexpr size_t BYTES_RESULTADO = SOC_ADC_DIGI_RESULT_BYTES;
@@ -52,6 +56,7 @@ nodo1::Receptor receptor;               // global: ~26 KB, no cabe en la pila de
 uint8_t salidaDiagnostico[trama::tamanoDiagnostico(nodo1::MAX_REPORTADAS)];
 uint8_t salidaEspectro[trama::tamanoEspectro(N)];
 bool pedirEspectro = false;
+bool tonoPrueba = false;
 uint32_t tMaxUs = 0;                    // peor tiempo de analisis observado
 
 // El driver llama esto en interrupcion cuando su almacen interno se llena porque
@@ -111,6 +116,18 @@ void atenderComandos() {
                           static_cast<unsigned long>(receptor.pistas_descartadas));
         } else if (c == 'f') {
             pedirEspectro = true;
+        } else if (c == 't') {
+            // Onda cuadrada de 1000 Hz al 50 %: fundamental en 1000 Hz y armonicos
+            // impares (3000, 5000, 7000 Hz), todos tonos que el receptor debe ver.
+            tonoPrueba = !tonoPrueba;
+            if (tonoPrueba) {
+                ledcAttach(PIN_PRUEBA, F_PRUEBA, 8);
+                ledcWrite(PIN_PRUEBA, 128);
+            } else {
+                ledcDetach(PIN_PRUEBA);
+            }
+            Serial.printf("\n#prueba tono=%s f=%lu Hz pin=%u\n", tonoPrueba ? "on" : "off",
+                          static_cast<unsigned long>(F_PRUEBA), static_cast<unsigned>(PIN_PRUEBA));
         }
     }
 }

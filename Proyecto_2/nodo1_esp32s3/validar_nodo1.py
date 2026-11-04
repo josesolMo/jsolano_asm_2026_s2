@@ -13,6 +13,8 @@ Este script:
 
 Uso (desde la carpeta que contiene nodo1_esp32s3/, con la placa conectada):
     python nodo1_esp32s3/validar_nodo1.py --puerto COM6 --segundos 4 --modo 3
+Autoprueba con el tono de 1000 Hz de la propia placa (jumper GPIO5 -> GPIO4):
+    python nodo1_esp32s3/validar_nodo1.py --puerto COM6 --segundos 4 --tono
 Sin placa, con una captura guardada:
     python nodo1_esp32s3/validar_nodo1.py --archivo nodo1_esp32s3/capturas/validacion_<fecha>.bin
 """
@@ -31,7 +33,10 @@ from receptor_fft.src.receptor_fft import (  # noqa: E402
     FLAG_ARMONICO, FLAG_BANDA_UTIL, FLAG_INTERFERENTE, N_BLOQUE, SALTO, TABLAS_POR_MODO,
     Receptor, espectro_potencia, validar_contra_emisor)
 
-CALENTAMIENTO = 4    # analisis que tarda el historial de Python en igualar al de la placa (C4)
+# La placa venia analizando antes de que empiece la captura; Python arranca de cero.
+# La persistencia (C4) se iguala en 4 bloques, pero la frecuencia de cada pista es un
+# promedio 0.7*f + 0.3*f_nueva: tras 16 bloques la diferencia inicial queda en 0.7^16 = 0.3 %.
+CALENTAMIENTO = 16
 
 
 def crc16(datos, crc=0xFFFF):
@@ -90,8 +95,12 @@ def leer_tramas(flujo):
     return muestras, diagnosticos, espectros, estado
 
 
-def leer_puerto(puerto, segundos, baud):
-    """Lee el puerto 'segundos', pide un espectro al inicio y el estado al final."""
+def leer_puerto(puerto, segundos, baud, tono=False):
+    """Lee el puerto 'segundos', pide un espectro al inicio y el estado al final.
+
+    Con tono=True enciende el tono de prueba de 1000 Hz en GPIO5 antes de grabar
+    y lo apaga al terminar (requiere un jumper GPIO5 -> GPIO4).
+    """
     import serial  # pip install pyserial
 
     ser = serial.Serial()
@@ -101,6 +110,9 @@ def leer_puerto(puerto, segundos, baud):
     ser.rts = False
     ser.open()
     time.sleep(1.0)
+    if tono:
+        ser.write(b"t")
+        time.sleep(0.3)        # deja pasar los bloques del encendido
     ser.reset_input_buffer()
     ser.write(b"f")            # la placa envia el espectro del proximo bloque
     datos = bytearray()
@@ -110,6 +122,8 @@ def leer_puerto(puerto, segundos, baud):
     ser.write(b"e")
     time.sleep(0.3)
     datos += ser.read(16384)
+    if tono:
+        ser.write(b"t")        # apagar el tono para dejar el pin libre
     ser.close()
     return bytes(datos)
 
@@ -171,16 +185,17 @@ def resumen_placa(diagnosticos, modo):
     tiempos = [t for t, _ in diagnosticos.values()]
     print(f"\nAnalisis recibidos: {len(diagnosticos)}; tiempo por bloque en la placa: "
           f"medio {np.mean(tiempos) / 1000:.2f} ms, maximo {max(tiempos) / 1000:.2f} ms (de 32 ms)")
-    conteo = Counter()
+    # Se agrupa por bin (15.625 Hz) para no listar 2994, 2995 y 2996 Hz por separado.
+    grupos = {}
     for _, frecs in diagnosticos.values():
         for f, _, _, flags in frecs:
             tipo = ("interferente" + (", armonico" if flags & FLAG_ARMONICO else "")
                     if flags & FLAG_INTERFERENTE else "util" if flags & FLAG_BANDA_UTIL else "?")
-            conteo[(round(f), tipo)] += 1
-    if conteo:
-        print("Frecuencias validadas por la placa (Hz, tipo: bloques):")
-        for (f, tipo), c in conteo.most_common(8):
-            print(f"  {f:6d} Hz, {tipo}: {c}")
+            grupos.setdefault((round(f * N_BLOQUE / 16000), tipo), []).append(f)
+    if grupos:
+        print("Frecuencias validadas por la placa (media, rango, tipo: bloques):")
+        for (_, tipo), fs in sorted(grupos.items(), key=lambda g: -len(g[1]))[:8]:
+            print(f"  {np.mean(fs):8.2f} Hz ({min(fs):.2f} a {max(fs):.2f}), {tipo}: {len(fs)}")
     else:
         print("La placa no valido ninguna frecuencia.")
     if modo is None:
@@ -204,6 +219,23 @@ def resumen_placa(diagnosticos, modo):
               + ", ".join(f"{f}: {c}" for f, c in no_esperadas.most_common(5)))
 
 
+def medir_fs(diagnosticos, f_real=1000.0):
+    """Con el tono de prueba: estima la frecuencia de muestreo real del ADC.
+
+    Si el ADC muestrea a fs_real en lugar de 16000 Hz, un tono de f_real aparece
+    en f_med = f_real * 16000 / fs_real, de donde fs_real = 16000 * f_real / f_med.
+    """
+    medidas = [f for _, frecs in diagnosticos.values() for f, _, _, _ in frecs
+               if abs(f - f_real) < 30]
+    if not medidas:
+        print("\nTono de prueba: no se detecto 1000 Hz. Revise el jumper GPIO5 -> GPIO4.")
+        return
+    f_med = float(np.median(medidas))
+    fs_real = 16000 * f_real / f_med
+    print(f"\nTono de prueba de {f_real:g} Hz: medido {f_med:.2f} Hz en {len(medidas)} bloques "
+          f"-> fs real del ADC ~ {fs_real:.0f} Hz ({100 * (fs_real / 16000 - 1):+.2f} %)")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     fuente = p.add_mutually_exclusive_group(required=True)
@@ -213,10 +245,12 @@ def main():
     p.add_argument("--baud", type=int, default=921600)
     p.add_argument("--modo", type=int, choices=sorted(TABLAS_POR_MODO),
                    help="modo del emisor, para comparar con su tabla (opcional)")
+    p.add_argument("--tono", action="store_true",
+                   help="usar el tono de prueba de 1000 Hz de la placa (jumper GPIO5 -> GPIO4)")
     args = p.parse_args()
 
     if args.puerto:
-        flujo = leer_puerto(args.puerto, args.segundos, args.baud)
+        flujo = leer_puerto(args.puerto, args.segundos, args.baud, args.tono)
         carpeta = CARPETA / "capturas"
         carpeta.mkdir(exist_ok=True)
         archivo = carpeta / f"validacion_{time.strftime('%Y%m%d_%H%M%S')}.bin"
@@ -236,6 +270,8 @@ def main():
     ok_fft = validar_fft(espectros)
     ok_rx = validar_receptor(muestras, diagnosticos)
     resumen_placa(diagnosticos, args.modo)
+    if args.tono:
+        medir_fs(diagnosticos)
     if ok_fft is False or ok_rx is False:
         sys.exit(1)
 
