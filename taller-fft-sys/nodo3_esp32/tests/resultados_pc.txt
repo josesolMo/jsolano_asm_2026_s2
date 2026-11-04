@@ -11,13 +11,15 @@
 [OK ] BER=0.0001, perdida=10%: C++ acepta 8 == Python 8; tramas danadas aceptadas: 0; crc_err=32
 [OK ] BER=0.0005, perdida=20%: C++ acepta 0 == Python 0; tramas danadas aceptadas: 0; crc_err=30
 [OK ] secuencia: huecos, repetidas y envoltura u16: 0 0 0 0 2 -1 -1 0 | perdidas=2 repetidas=2
-[OK ] enlace: 460 800 baud elegido por link.disenar_enlace: trama 2056 B, 321.2 kb/s netos, utilizacion 69.7 %
+[OK ] formato de entrada adc12 / q15: [0.5, 0.0, -1.0, 0.999512, 0.5, -1.0]
+[OK ] enlace: 460 800 baud es el minimo de link.disenar_enlace; el Nodo 1 usa 921 600: trama 2056 B, 321.2 kb/s netos, utilizacion 69.7 % a 460 800 y 34.9 % a 921 600
 
 RESULTADO: TODAS LAS COMPROBACIONES PASARON
 [OK ] P3 FFT vs numpy: error relativo max = 1.41e-07
 [OK ] P3 IFFT(FFT(x)) = x: error abs max = 7.15e-07
 [OK ] P4 bypass FFT+IFFT+OLA reconstruye: error abs max = 1.79e-07 (escala +-1, float32)
 [OK ] P4 sin discontinuidades en las uniones: max |dy| = 1.0000 vs entrada 1.0000
+[OK ] P5 P1 cuenta cruda del ADC (0..4095) -> escala +-1: rango de cuentas [421, 3686], conversion exacta
 [OK ] P5 P1 filtro C++ vs Python (mismo diag): error abs max = 2.68e-07
 [OK ] P5 P1 piso local vs Nodo 1 (Python): error relativo max (bins > -60 dB) = 0.00e+00; error absoluto/pico = 2.4e-12 (-116 dB)
 [OK ] P5 P1 interferentes locales == Nodo 1: 64/64 bloques con la misma lista de bins
@@ -26,6 +28,7 @@ RESULTADO: TODAS LAS COMPROBACIONES PASARON
 [INFO] EXT P1 interferentes de PARAMS real (receptor_fft) 7.9/bloque vs acquisition.py 1.0/bloque: dSNR 38.68 dB vs 38.73 dB, E_util 100.0 % vs 100.0 %
 [OK ] P5 P1 Metrics (C++) == metricas() (Python): SNRout 43.750/43.750 dB, MSE 6.125e-06/6.125e-06, Eutil 100.00/100.00 %
 [OK ] P5 P1 dSNR C++ ~ Python: dSNR py=38.73 dB, c++=38.73 dB
+[OK ] P5 P2 cuenta cruda del ADC (0..4095) -> escala +-1: rango de cuentas [513, 3686], conversion exacta
 [OK ] P5 P2 filtro C++ vs Python (mismo diag): error abs max = 1.27e-07
 [OK ] P5 P2 piso local vs Nodo 1 (Python): error relativo max (bins > -60 dB) = 2.26e-05; error absoluto/pico = 1.8e-11 (-108 dB)
 [OK ] P5 P2 interferentes locales == Nodo 1: 64/64 bloques con la misma lista de bins
@@ -34,6 +37,7 @@ RESULTADO: TODAS LAS COMPROBACIONES PASARON
 [INFO] EXT P2 interferentes de PARAMS real (receptor_fft) 0.4/bloque vs acquisition.py 0.0/bloque: dSNR 12.37 dB vs 12.45 dB, E_util 100.0 % vs 100.0 %
 [OK ] P5 P2 Metrics (C++) == metricas() (Python): SNRout 12.474/12.474 dB, MSE 1.269e-03/1.269e-03, Eutil 100.00/100.00 %
 [OK ] P5 P2 dSNR C++ ~ Python: dSNR py=12.45 dB, c++=12.45 dB
+[OK ] P5 P5 cuenta cruda del ADC (0..4095) -> escala +-1: rango de cuentas [671, 3686], conversion exacta
 [OK ] P5 P5 filtro C++ vs Python (mismo diag): error abs max = 1.24e-07
 [OK ] P5 P5 piso local vs Nodo 1 (Python): error relativo max (bins > -60 dB) = 1.81e-05; error absoluto/pico = 1.6e-11 (-108 dB)
 [OK ] P5 P5 interferentes locales == Nodo 1: 64/64 bloques con la misma lista de bins
