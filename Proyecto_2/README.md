@@ -34,6 +34,12 @@ MAX4466 ─> GPIO4 ┌──────────── Nodo 1: ESP32-S3 ─�
 | Nodo 1 GND | Nodo 3 GND | obligatorio |
 | Nodo 3 GPIO25 (DAC1) | 1 kΩ en serie + 33 nF a GND | filtro de reconstrucción (corte ≈ 4,8 kHz) |
 | Salida del RC | 1 µF ─> potenciómetro ─> entrada + del LM386 | parlante de 8 Ω 2 W en la salida del LM386 |
+| Nodo 3 GPIO26 (DAC2) | otro RC igual (1 kΩ + 10 nF) | salida del nodo 2 (FIR), siempre activa: osciloscopio o segundo parlante |
+| MAX4466 OUT | RC anti-aliasing (p. ej. 2,2 kΩ + 10 nF, corte ≈ 7 kHz) ─> GPIO4 | fs = 16 kHz: lo que pase de 8 kHz se dobla |
+
+La placa 2 implementa los nodos 2 y 3 (el enunciado lo permite en un micro multinúcleo, con dos
+rutas independientes y dos salidas comparables): las dos rutas procesan cada bloque a la vez y
+cada una tiene su DAC. GPIO25 (parlante) saca lo que se elige con `mode`; GPIO26 saca siempre el FIR.
 
 Prueba sin micrófono: un jumper GPIO5 → GPIO4 en el nodo 1 y el comando `t` inyectan un
 tono de 1000 Hz generado por la propia placa.
@@ -68,8 +74,13 @@ al arrancar, para el modo `fir`.
 4. **Después, sin interferencia con el sonido del profe**: en el nodo 1, `g10` graba
    10 s mientras suena el contaminado; cuando termine, `x` lo reproduce por todo el
    sistema y el nodo 3 lo saca ya limpio. Se puede repetir `x` con otro `mode`.
-5. Métricas: `metrics` en el nodo 3 (las métricas sin referencia son estimaciones y
-   están rotuladas así).
+5. Gráficas: cerrar el monitor del nodo 3 y correr
+   `python nodo3_esp32/tools/graficar_captura.py COM7`: formas de onda y espectros de la
+   entrada y de las dos salidas, con la atenuación y la energía conservada de cada método.
+6. Métricas: `metrics` en el nodo 3 muestra los dos métodos lado a lado (las métricas
+   sin referencia son estimaciones y están rotuladas así). El micrófono y el parlante
+   deben quedar separados para evitar realimentación acústica; con `g` / `x` el sonido
+   limpio sale después y no se mezcla con el contaminado.
 
 ## Pruebas en la PC (sin placas)
 

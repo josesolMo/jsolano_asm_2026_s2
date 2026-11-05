@@ -111,6 +111,16 @@ Valores iniciales (los de `config.py`): α = 3,0, β = 0,1, `G_interf` = 0,01, `
 | `filter` | filtro adaptativo |
 | `fir` | filtro temporal del Nodo 2 (FIR de `coeficientes.h`), retardado HOP como los demás; `scen` elige el perfil |
 
+`mode` solo elige qué sale por **GPIO25** (parlante). Las dos rutas —espectral (Nodo 3) y FIR (Nodo 2)— procesan
+cada avance a la vez, cada una con sus métricas (`metrics` las muestra lado a lado), y **GPIO26** saca siempre el FIR:
+dos rutas independientes y dos salidas comparables en un mismo ESP32, como permite el enunciado. Los dos DAC van en modo
+alternado (`DAC_CHANNEL_MODE_ALTER`); si un tono sonara una octava abajo y el anillo se llenara, `dac x2` corrige la
+frecuencia.
+
+`captura [bloques]` (`captura.h`) envía por USB un tramo de la entrada y de las dos salidas tal como las calculó el micro,
+con el piso y los interferentes vigentes; `python nodo3_esp32/tools/graficar_captura.py COM7` lo pide, guarda la trama y
+grafica formas de onda y espectros, con la atenuación y la energía conservada de cada método (evidencia de P1–P5).
+
 `recomendar` (`recomendacion.h`) sugiere `fir` o `filter` con su razón: un interferente bajo el borde de rechazo del FIR
 lo atraviesa; un ruido casi solo tonal se quita mejor con el notch; si > 25 % del ruido de fondo cae en la banda útil, o el FIR
 quitaría < 3 dB, conviene el espectral; si no, el FIR. Con la cadena completa en el PC elige en P1–P5 el método de mayor
@@ -190,8 +200,10 @@ coinciden en 64/64 bloques en P1, P2 y P5.
   es una estimación; falta además el costo del diagnóstico local (mediana de 51 bins × 513) y la consola.
 - **DAC de 8 bits**, no 12 como supone `config.py` (efecto simulado arriba). El arranque del DMA puede producir un transitorio audible/visible
   (la salida pasa del reposo a 128 al arrancar el continuo): no verificado.
-- **Sin reloj común:** emisor, Nodo 1 y Nodo 3 tienen cristales distintos; con el APLL la `fs` real del DAC no está medida. El anillo se vaciará o
-  llenará en operación larga (se cuenta, no se corrige).
+- **Sin reloj común:** emisor, Nodo 1 y Nodo 3 tienen cristales distintos (en placa: el ADC del Nodo 1 va ~0,36 % más rápido que
+  el DAC). `reloj apll` (defecto) ajusta la frecuencia del APLL que mueve el DAC según el nivel del anillo, sin tocar el audio;
+  `reloj interp` remuestrea la salida (respaldo, si el APLL no se puede cambiar); `reloj off` no compensa. `status` muestra el
+  ajuste en ppm. Simulados en `tests/test_reloj.py` (±0,36 %: anillo estable; el APLL converge a la diferencia real).
 - La ganancia espectral no se suaviza entre avances (como en Python); el solape con sqrt‑Hann lo atenúa, pero puede dejar «ruido musical».
 - Una sola salida DAC (GPIO25) con modos conmutables; no hay salida simultánea de entrada y salida en GPIO26.
 - El método temporal del Nodo 2 corre **dentro de este nodo** (`mode fir`, `salida_fir.h`): con un solo parlante basta conmutar

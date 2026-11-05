@@ -10,3 +10,5 @@ cd "$RAIZ"
 "$PY" nodo3_esp32/tests/test_dsp_vs_python.py
 "$PY" nodo3_esp32/tests/test_fir.py
 "$PY" nodo3_esp32/tests/test_recomendar.py
+"$PY" nodo3_esp32/tests/test_reloj.py
+"$PY" nodo3_esp32/tests/test_captura.py

@@ -19,6 +19,7 @@
 #include "metrics.h"
 #include "salida_fir.h"
 #include "recomendacion.h"
+#include "captura.h"
 #include <new>
 
 #if !CONFIG_IDF_TARGET_ESP32
@@ -43,6 +44,13 @@ static AudioOut g_audio;
 // En el heap (setup): como globales no caben en la DRAM estatica del ESP32 clasico.
 static SalidaFir* g_fir = nullptr;        // filtro temporal (Nodo 2) para 'mode fir'
 static StatsSenales* g_stats_fir = nullptr;   // metricas espectrales de la salida FIR
+static Metrics* g_met_fir = nullptr;      // metricas de la ruta temporal (Nodo 2)
+
+// 'captura': graba un tramo de entrada + las dos salidas y lo envia por USB sin bloquear el proceso.
+enum class EstadoCaptura : uint8_t { Libre, Grabando, Enviando };
+static EstadoCaptura g_cap_estado = EstadoCaptura::Libre;
+static uint8_t* g_cap = nullptr;          // la trama completa, en el heap solo mientras se usa
+static size_t g_cap_n = 0, g_cap_idx = 0, g_cap_largo = 0, g_cap_enviado = 0;
 
 struct Bloque { uint16_t seq; int16_t m[N]; };
 static Bloque g_pool[POOL_BLOCKS];
@@ -145,22 +153,38 @@ static void elegir_diagnostico(const float* x) {
   }
 }
 
-// Procesa un bloque de N muestras (float) y entrega N muestras a la salida.
+// Procesa un bloque de N muestras (float) por las DOS rutas independientes, en cada avance de HOP:
+//   ruta espectral (Nodo 3): FFT, G, IFFT, OLA   -> y_esp, metricas g_met
+//   ruta temporal  (Nodo 2): FIR de fase lineal  -> y_fir, metricas g_met_fir
+// Las dos salen retardadas exactamente HOP (comparables muestra a muestra con la entrada).
+// GPIO25 saca lo que elige 'mode' (filter/fir/raw/bypass); GPIO26 saca siempre el FIR.
 static void procesar_float(const float* x, const float* s /* referencia o nullptr */) {
   elegir_diagnostico(x);
+  float* y_esp = g_y;                                // dos mitades de g_y: sin mas memoria estatica
+  float* y_fir = g_y + HOP;
   for (int h = 0; h < 2; ++h) {
-    HopStats hs;
-    float* y = g_y + h * HOP;
-    g_nodo.advance(x + h * HOP, &g_diag, g_p, y, &hs);
-    if (g_p.modo == Modo::Crudo) memcpy(y, g_raw_prev, sizeof g_raw_prev);   // entrada retardada HOP: A/B justo
-    if (g_p.modo == Modo::Fir) {                                             // FIR del Nodo 2, tambien retardado HOP
-      g_fir->procesar(x + h * HOP, y);
-      g_stats_fir->on_hop(g_raw_prev, y, &g_diag, g_p, &hs);
+    HopStats hs, hf;
+    g_nodo.advance(x + h * HOP, &g_diag, g_p, y_esp, &hs);
+    g_fir->procesar(x + h * HOP, y_fir);
+    g_stats_fir->on_hop(g_raw_prev, y_fir, &g_diag, g_p, &hf);
+    const float* y25 = g_p.modo == Modo::Fir ? y_fir : g_p.modo == Modo::Crudo ? g_raw_prev : y_esp;
+    g_audio.escribir(y25, y_fir, HOP);
+    g_met.on_hop(hs);
+    g_met_fir->on_hop(hf);
+    if (s && g_tiene_prev) {                                                 // y[t] corresponde a x[t-HOP]
+      g_met.on_samples(g_prev_s, g_prev_x, y_esp, HOP);
+      g_met_fir->on_samples(g_prev_s, g_prev_x, y_fir, HOP);
+    }
+    if (g_cap_estado == EstadoCaptura::Grabando) {                         // entrada alineada con las salidas
+      captura_muestras(g_cap, g_cap_n, g_cap_idx, g_raw_prev, y_esp, y_fir, HOP);
+      g_cap_idx += HOP;
+      if (g_cap_idx >= g_cap_n) {
+        g_cap_largo = captura_cerrar(g_cap, g_cap_n, uint8_t(g_p.modo), uint8_t(g_fir->perfil()), g_diag, g_p);
+        g_cap_enviado = 0;
+        g_cap_estado = EstadoCaptura::Enviando;
+      }
     }
     memcpy(g_raw_prev, x + h * HOP, sizeof g_raw_prev);
-    g_audio.escribir(y, HOP);
-    g_met.on_hop(hs);
-    if (s && g_tiene_prev) g_met.on_samples(g_prev_s, g_prev_x, y, HOP);      // y[t] corresponde a x[t-HOP]
     memcpy(g_prev_x, x + h * HOP, sizeof g_prev_x);
     if (s) memcpy(g_prev_s, s + h * HOP, sizeof g_prev_s);
     g_tiene_prev = true;
@@ -206,7 +230,9 @@ static void generar_bloque() {
     g_gen_fase1 += w1; if (g_gen_fase1 > 2 * M_PI) g_gen_fase1 -= 2 * M_PI;
     g_gen_fase2 += w2; if (g_gen_fase2 > 2 * M_PI) g_gen_fase2 -= 2 * M_PI;
     if (v > 0.999f) v = 0.999f; else if (v < -0.999f) v = -0.999f;
-    b.m[i] = int16_t(lrintf(v * 32768.0f));
+    // en el formato de entrada activo, para que 'src gen' no dependa de 'fmt'
+    b.m[i] = g_p.formato == FormatoIn::Q15 ? int16_t(lrintf(v * 32768.0f))
+                                           : int16_t(lrintf(v * 2048.0f + g_p.adc_mid));
   }
   b.seq = g_gen_seq++;
   procesar_bloque(b);
@@ -223,20 +249,35 @@ static void imprimir_parametros() {
                 g_fuente_interna ? "generador" : "uart", g_p.formato == FormatoIn::Adc12 ? "adc12" : "q15", g_p.adc_mid);
 }
 
+static void reiniciar_metricas() { g_met.reset(); g_met_fir->reset(); g_tiene_prev = false; }
+
+static const char* nombre_escucha() {
+  return g_p.modo == Modo::Fir ? "fir (temporal, Nodo 2)" : g_p.modo == Modo::Crudo ? "raw (entrada sin filtrar)"
+       : g_p.modo == Modo::Bypass ? "bypass (FFT+IFFT con G=1)" : "filter (espectral, Nodo 3)";
+}
+
+// Las dos rutas lado a lado: la comparacion cuantitativa que pide el enunciado.
 static void imprimir_metricas() {
-  const Reporte r = g_met.reporte();
-  Serial.printf("[SIN REFERENCIA] hops=%lu atenuacion_rango=%.2f dB util_conservada=%.1f %% reduccion_piso(est)=%.2f dB "
-                "SNR_est_in=%.2f dB SNR_est_out=%.2f dB (ESTIMADAS, no son SNR verdaderos) bins_atenuados=%.1f\n",
-                (unsigned long)r.hops, r.atenuacion_rng_db, r.util_conservada_pct, r.reduccion_piso_db,
-                r.snr_est_in_db, r.snr_est_out_db, r.bins_atenuados_medio);
-  if (r.ref_muestras) {
-    Serial.printf("[CON REFERENCIA] muestras=%lu MSE=%.4e SNR_in=%.2f dB SNR_out=%.2f dB dSNR=%.2f dB E_util=%.1f %%\n",
-                  (unsigned long)r.ref_muestras, r.mse, r.snr_in, r.snr_out, r.dsnr, r.e_util);
+  const Reporte e = g_met.reporte(), f = g_met_fir->reporte();
+  Serial.printf("[METODO ACTIVO] GPIO25 (parlante): %s | GPIO26: fir (temporal, Nodo 2)\n", nombre_escucha());
+  Serial.printf("                                  ESPECTRAL (Nodo 3)   FIR %s (Nodo 2)\n", nombre_perfil(g_fir->perfil()));
+  Serial.printf("[SIN REF] atenuacion en rint      %8.2f dB          %8.2f dB\n", e.atenuacion_rng_db, f.atenuacion_rng_db);
+  Serial.printf("          energia util conservada %8.1f %%           %8.1f %%\n", e.util_conservada_pct, f.util_conservada_pct);
+  Serial.printf("          SNR est. entrada        %8.2f dB          %8.2f dB   (ESTIMADAS con el piso del Nodo 1,\n", e.snr_est_in_db, f.snr_est_in_db);
+  Serial.printf("          SNR est. salida         %8.2f dB          %8.2f dB    no son SNR verdaderos)\n", e.snr_est_out_db, f.snr_est_out_db);
+  Serial.printf("          reduccion del piso      %8.2f dB          %8.2f dB   avances=%lu\n", e.reduccion_piso_db, f.reduccion_piso_db,
+                (unsigned long)e.hops);
+  if (e.ref_muestras) {
+    Serial.printf("[CON REF] MSE                     %10.4e        %10.4e   muestras=%lu\n", e.mse, f.mse, (unsigned long)e.ref_muestras);
+    Serial.printf("          SNR entrada             %8.2f dB          %8.2f dB\n", e.snr_in, f.snr_in);
+    Serial.printf("          SNR salida              %8.2f dB          %8.2f dB\n", e.snr_out, f.snr_out);
+    Serial.printf("          mejora dSNR             %8.2f dB          %8.2f dB\n", e.dsnr, f.dsnr);
+    Serial.printf("          energia util            %8.1f %%           %8.1f %%\n", e.e_util, f.e_util);
   } else {
-    Serial.println("[CON REFERENCIA] no disponible: active 'ref on', conecte la referencia limpia y use 'metrics reset' antes de la prueba.");
+    Serial.println("[CON REF] MSE y SNR verdaderos: requieren la senal limpia ('ref on' + referencia por UART1, 'metrics reset').");
   }
   const double avg = g_met.t_blocks ? g_met.t_sum_us / g_met.t_blocks : 0;
-  Serial.printf("[TIEMPO] bloques=%lu us/bloque: prom=%.0f min=%lu max=%lu (presupuesto %lu us) excedidos=%lu\n",
+  Serial.printf("[TIEMPO] bloques=%lu us/bloque (las dos rutas): prom=%.0f min=%lu max=%lu (presupuesto %lu us) excedidos=%lu\n",
                 (unsigned long)g_met.t_blocks, avg, (unsigned long)(g_met.t_blocks ? g_met.t_min_us : 0),
                 (unsigned long)g_met.t_max_us, (unsigned long)(1000000ull * N / FS), (unsigned long)g_met.t_excedidos);
 }
@@ -250,18 +291,21 @@ static void imprimir_estado() {
   Serial.printf("[BLOQUES] procesados=%lu perdidos=%lu rellenados=%lu repetidos=%lu resync=%lu desbordes_cola=%lu\n",
                 (unsigned long)g_bloques, (unsigned long)g_perdidos, (unsigned long)g_rellenados,
                 (unsigned long)g_repetidos, (unsigned long)g_resync, (unsigned long)g_overflow);
-  Serial.printf("[DAC] activo=%d escritas=%lu vacios=%lu (muestras %lu) desbordes_anillo=%lu saturadas=%lu errores=%lu anillo=%u/%u (%.0f ms)\n",
+  Serial.printf("[DAC] activo=%d escritas=%lu vacios=%lu (muestras %lu) desbordes_anillo=%lu saturadas=%lu errores=%lu anillo=%u/%u (%.0f ms) "
+                "reloj=%s ajuste=%+.0f ppm (APLL %.0f Hz, %lu cambios)\n",
                 g_audio.stats.activo, (unsigned long)g_audio.stats.escritas, (unsigned long)g_audio.stats.vacios,
                 (unsigned long)g_audio.stats.muestras_vacias, (unsigned long)g_audio.stats.desbordes,
                 (unsigned long)g_audio.stats.saturadas, (unsigned long)g_audio.stats.errores_dac,
-                (unsigned)g_audio.ring.size(), (unsigned)RING_SAMPLES, 1000.0 * g_audio.ring.size() / FS);
+                (unsigned)g_audio.cuadros(), (unsigned)(RING_SAMPLES / CANALES_DAC), 1000.0 * g_audio.cuadros() / FS,
+                g_audio.modo_reloj() == ModoReloj::Apll ? "apll" : g_audio.modo_reloj() == ModoReloj::Interp ? "interp" : "off",
+                g_audio.ajuste_ppm(), g_audio.apll_nominal_hz(), (unsigned long)g_audio.stats.ajustes_apll);
   Serial.printf("[MEMORIA] heap libre=%lu minimo=%lu total=%lu B; pila loop libre=%u B\n",
                 (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getMinFreeHeap(), (unsigned long)ESP.getHeapSize(),
                 (unsigned)uxTaskGetStackHighWaterMark(nullptr));
   Serial.printf("[LATENCIA] algoritmica=%lu ms (bloque %lu + solape %lu) + DMA %lu ms + anillo %.0f ms; "
                 "fallbacks de diagnostico externo=%lu\n",
                 (unsigned long)(1000ul * (N + HOP) / FS), (unsigned long)(1000ul * N / FS), (unsigned long)(1000ul * HOP / FS),
-                (unsigned long)(1000ul * DAC_DESC_NUM * DAC_DESC_BYTES / 2 / FS), 1000.0 * g_audio.ring.size() / FS,
+                (unsigned long)(1000ul * DAC_DESC_NUM * DAC_DESC_BYTES / 2 / CANALES_DAC / FS), 1000.0 * g_audio.cuadros() / FS,
                 (unsigned long)g_ext_fallback);
 }
 
@@ -302,7 +346,7 @@ static void escenario(const char* id) {
     if (!strcasecmp(id, e.id)) {
       g_p.banda_lo = e.blo; g_p.banda_hi = e.bhi; g_p.rint_lo = e.rlo; g_p.rint_hi = e.rhi;
       g_fir->set_perfil(e.fir); g_stats_fir->reset();
-      g_met.reset(); g_tiene_prev = false;
+      reiniciar_metricas();
       Serial.printf("Escenario %s: banda util %.0f-%.0f Hz, rango de interferencia %.0f-%.0f Hz, perfil FIR %s. Metricas reiniciadas.\n",
                     e.id, e.blo, e.bhi, e.rlo, e.rhi, nombre_perfil(e.fir));
       return;
@@ -344,6 +388,34 @@ static void recomendar_ahora() {
   Serial.print(texto);
 }
 
+static void iniciar_captura(const char* arg) {
+  if (g_cap_estado != EstadoCaptura::Libre) { Serial.println("#captura en curso"); return; }
+  int bloques = arg ? atoi(arg) : 4;
+  if (bloques < 1 || bloques > int(CAPTURA_MAX_BLOQUES)) bloques = 4;
+  g_cap_n = size_t(bloques) * N;
+  g_cap = static_cast<uint8_t*>(malloc(captura_tamano(g_cap_n)));
+  if (!g_cap) { Serial.println("#error sin memoria para la captura"); return; }
+  g_cap_idx = 0;
+  Serial.printf("#captura %d bloques (%.0f ms); se envia en binario (tools/graficar_captura.py)\n",
+                bloques, 1000.0 * g_cap_n / FS);
+  g_cap_estado = EstadoCaptura::Grabando;
+}
+
+// Envia la trama de captura de a poco (lo que quepa en el bufer del USB): el proceso no se detiene.
+static void enviar_captura() {
+  if (g_cap_estado != EstadoCaptura::Enviando) return;
+  const int libre = Serial.availableForWrite();
+  if (libre <= 0) return;
+  size_t w = g_cap_largo - g_cap_enviado;
+  if (w > size_t(libre)) w = size_t(libre);
+  Serial.write(g_cap + g_cap_enviado, w);
+  g_cap_enviado += w;
+  if (g_cap_enviado >= g_cap_largo) {
+    free(g_cap); g_cap = nullptr;
+    g_cap_estado = EstadoCaptura::Libre;
+  }
+}
+
 static void ayuda() {
   Serial.println(
     "Comandos (terminar con Enter):\n"
@@ -352,6 +424,8 @@ static void ayuda() {
     "  mode filter|fir|bypass|raw  que se escucha: filter=espectral (Nodo 3), fir=temporal (Nodo 2), raw=entrada sin filtrar\n"
     "  fir tono|multitono|audio|transitoria   perfil del FIR (scen lo elige solo)\n"
     "  recomendar                 que metodo conviene para el ruido actual y por que\n"
+    "  reloj apll|interp|off      seguir el reloj del Nodo 1: ajustando el APLL del DAC (defecto) o remuestreando\n"
+    "  captura [bloques]          envia entrada + salidas (1-8 bloques) para graficar en la PC\n"
     "  diag local|ext             origen del piso/interferentes (ext = tramas del Nodo 1, con respaldo local)\n"
     "  scen P1..P5                banda util y rango de interferencia del escenario\n"
     "  ref on|off                 referencia limpia por UART1 (metricas verdaderas); 'metrics reset' antes de la prueba\n"
@@ -359,7 +433,8 @@ static void ayuda() {
     "  baud <n>                   velocidad de la UART2 (debe coincidir con el Nodo 1; defecto 921600)\n"
     "  src uart|gen               fuente: UART2 (Nodo 1) o generador interno\n"
     "  gen f1 a1 f2 a2 ruido      generador: dos tonos (Hz, amplitud 0-1) + ruido blanco (amplitud)\n"
-    "  gain <codigos>             ganancia del DAC (127 = escala completa), dac stop|start");
+    "  gain <codigos>             ganancia del DAC (127 = escala completa), dac stop|start\n"
+    "  dac x1|x2                  si el tono suena una octava abajo y el anillo se llena: dac x2");
 }
 
 static void comando(char* l) {
@@ -370,12 +445,18 @@ static void comando(char* l) {
   if (!strcmp(a, "help") || !strcmp(a, "?")) ayuda();
   else if (!strcmp(a, "status")) imprimir_estado();
   else if (!strcmp(a, "params")) imprimir_parametros();
-  else if (!strcmp(a, "metrics")) { if (b && !strcmp(b, "reset")) { g_met.reset(); g_tiene_prev = false; Serial.println("metricas reiniciadas"); } else imprimir_metricas(); }
+  else if (!strcmp(a, "metrics")) { if (b && !strcmp(b, "reset")) { reiniciar_metricas(); Serial.println("metricas reiniciadas"); } else imprimir_metricas(); }
   else if (!strcmp(a, "bench")) benchmark();
   else if (!strcmp(a, "recomendar")) recomendar_ahora();
+  else if (!strcmp(a, "captura")) iniciar_captura(b);
+  else if (!strcmp(a, "reloj") && b) {
+    g_audio.set_modo_reloj(!strcmp(b, "interp") ? ModoReloj::Interp : !strcmp(b, "off") ? ModoReloj::Off : ModoReloj::Apll);
+    Serial.printf("reloj: %s\n", g_audio.modo_reloj() == ModoReloj::Apll ? "apll (ajusta el reloj del DAC)"
+                  : g_audio.modo_reloj() == ModoReloj::Interp ? "interp (remuestrea la salida)" : "off (sin compensar)");
+  }
   else if (!strcmp(a, "stream")) {
     g_stream = b && !strcmp(b, "on");
-    if (g_stream) Serial.println("#N3,ms,bloques,perdidos,crc,desb_cola,vacios_dac,saturadas,us_prom,us_max,aten_db,util_pct,snr_est_in,snr_est_out,anillo,mse,snr_in,snr_out,dsnr,e_util");
+    if (g_stream) Serial.println("#N3,ms,bloques,perdidos,crc,desb_cola,vacios_dac,saturadas,us_prom,us_max,aten_db,util_pct,snr_est_in,snr_est_out,anillo,mse,snr_in,snr_out,dsnr,e_util,aten_fir,util_fir,snr_est_out_fir,mse_fir,dsnr_fir,escucha");
   }
   else if (!strcmp(a, "set") && b && c) {
     const float v = atof(c);
@@ -391,16 +472,16 @@ static void comando(char* l) {
     imprimir_parametros();
   }
   else if (!strcmp(a, "mode") && b) {
-    const Modo antes = g_p.modo;
+    // Solo elige que se escucha por GPIO25: las dos rutas siguen procesando y midiendo.
+    // 'bypass' es la excepcion: la ruta espectral deja G = 1 (comprueba la reconstruccion).
     g_p.modo = !strcmp(b, "bypass") ? Modo::Bypass : !strcmp(b, "raw") ? Modo::Crudo : !strcmp(b, "fir") ? Modo::Fir : Modo::Filtro;
-    if (g_p.modo != antes) { g_met.reset(); g_tiene_prev = false; }      // metricas de un solo modo
-    if (g_p.modo == Modo::Fir && antes != Modo::Fir) { g_fir->reiniciar(); g_stats_fir->reset(); }
+    Serial.printf("GPIO25 (parlante): %s\n", nombre_escucha());
     imprimir_parametros();
   }
   else if (!strcmp(a, "fir") && b) {
     const PerfilFir p = !strcmp(b, "tono") ? PerfilFir::Tono : !strcmp(b, "audio") ? PerfilFir::Audio
                       : !strcmp(b, "transitoria") ? PerfilFir::Transitoria : PerfilFir::Multitono;
-    g_fir->set_perfil(p); g_stats_fir->reset(); g_met.reset(); g_tiene_prev = false;
+    g_fir->set_perfil(p); g_stats_fir->reset(); g_met_fir->reset();
     imprimir_parametros();
   }
   else if (!strcmp(a, "diag") && b) { g_p.fuente = !strcmp(b, "ext") ? FuenteDiag::Externo : FuenteDiag::Local; imprimir_parametros(); }
@@ -415,14 +496,19 @@ static void comando(char* l) {
     g_ref_activa = !strcmp(b, "on");
     if (g_ref_activa) { Serial1.setRxBufferSize(8192); Serial1.begin(BAUD, SERIAL_8N1, PIN_RX_REF, PIN_TX_REF); }   // GPIO18/19 solo se usan con la referencia
     else Serial1.end();
-    g_met.reset(); g_tiene_prev = false; imprimir_parametros(); }
+    reiniciar_metricas(); imprimir_parametros(); }
   else if (!strcmp(a, "src") && b) { g_fuente_interna = !strcmp(b, "gen"); g_gen_proximo_us = micros(); imprimir_parametros(); }
   else if (!strcmp(a, "gen") && b) {
     g_gen_f1 = atof(b); if (c) g_gen_a1 = atof(c); if (d) g_gen_f2 = atof(d); if (e) g_gen_a2 = atof(e); if (f) g_gen_ruido = atof(f);
     Serial.printf("generador: %.0f Hz x%.2f + %.0f Hz x%.2f + ruido %.2f\n", g_gen_f1, g_gen_a1, g_gen_f2, g_gen_a2, g_gen_ruido);
   }
   else if (!strcmp(a, "gain") && b) { g_audio.set_ganancia(constrain(atof(b), 0.0f, 127.0f)); Serial.printf("ganancia DAC = %.1f codigos\n", g_audio.ganancia()); }
-  else if (!strcmp(a, "dac") && b) { if (!strcmp(b, "stop")) g_audio.stop(); Serial.println("dac: el DMA arranca solo al acumular el prefill"); }
+  else if (!strcmp(a, "dac") && b) {
+    if (!strcmp(b, "stop")) g_audio.stop();
+    else if (!strcmp(b, "x1") || !strcmp(b, "x2")) g_audio.set_factor_alter(b[1] == '2' ? 2 : 1);   // reinicia el DMA
+    Serial.printf("dac: factor de frecuencia en modo alternado = x%lu; el DMA arranca solo al acumular el prefill\n",
+                  (unsigned long)g_audio.factor_alter());
+  }
   else Serial.println("comando desconocido; escriba help");
 }
 
@@ -436,16 +522,18 @@ static void atender_consola() {
 }
 
 static void emitir_estado_periodico() {
-  if (!g_stream || millis() < g_prox_estado_ms) return;
+  if (!g_stream || millis() < g_prox_estado_ms || g_cap_estado == EstadoCaptura::Enviando) return;
   g_prox_estado_ms = millis() + 1000;
-  const Reporte r = g_met.reporte();
+  const Reporte r = g_met.reporte(), f = g_met_fir->reporte();
   const double avg = g_met.t_blocks ? g_met.t_sum_us / g_met.t_blocks : 0;
-  Serial.printf("N3,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%.0f,%lu,%.2f,%.1f,%.2f,%.2f,%u,%.4e,%.2f,%.2f,%.2f,%.1f\n",
+  // escucha: 0 filter, 1 bypass, 2 raw, 3 fir (lo que sale por GPIO25)
+  Serial.printf("N3,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%.0f,%lu,%.2f,%.1f,%.2f,%.2f,%u,%.4e,%.2f,%.2f,%.2f,%.1f,%.2f,%.1f,%.2f,%.4e,%.2f,%u\n",
                 (unsigned long)millis(), (unsigned long)g_bloques, (unsigned long)g_perdidos,
                 (unsigned long)g_parser_n1.stats().crc_err, (unsigned long)g_overflow,
                 (unsigned long)g_audio.stats.vacios, (unsigned long)g_audio.stats.saturadas, avg,
                 (unsigned long)g_met.t_max_us, r.atenuacion_rng_db, r.util_conservada_pct, r.snr_est_in_db,
-                r.snr_est_out_db, (unsigned)g_audio.ring.size(), r.mse, r.snr_in, r.snr_out, r.dsnr, r.e_util);
+                r.snr_est_out_db, (unsigned)g_audio.cuadros(), r.mse, r.snr_in, r.snr_out, r.dsnr, r.e_util,
+                f.atenuacion_rng_db, f.util_conservada_pct, f.snr_est_out_db, f.mse, f.dsnr, (unsigned)g_p.modo);
 }
 
 // ------------------------------------------------------------------ setup / loop
@@ -455,7 +543,8 @@ void setup() {
   Serial.println("\nNodo 3 - filtrado espectral FFT/IFFT (CE1110)");
   g_fir = new (std::nothrow) SalidaFir();
   g_stats_fir = new (std::nothrow) StatsSenales();
-  if (!g_fir || !g_stats_fir) { Serial.println("ERROR: sin memoria para la salida FIR"); for (;;) delay(1000); }
+  g_met_fir = new (std::nothrow) Metrics();
+  if (!g_fir || !g_stats_fir || !g_met_fir) { Serial.println("ERROR: sin memoria para la salida FIR"); for (;;) delay(1000); }
   if (!g_nodo.begin() || !g_dlocal.begin() || !g_stats_fir->begin()) { Serial.println("ERROR: no se pudo iniciar la FFT"); for (;;) delay(1000); }
   g_diag.piso_valido = false; g_diag.n_interf = 0;
 
@@ -487,5 +576,6 @@ void loop() {
     else vTaskDelay(1);
   }
   atender_consola();
+  enviar_captura();
   emitir_estado_periodico();
 }

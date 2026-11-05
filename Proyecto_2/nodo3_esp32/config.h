@@ -54,12 +54,17 @@ constexpr int PIN_TX_REF = 19;           // UART1 TX  (sin uso)
 // ---- Salida DAC -----------------------------------------------------------
 constexpr int DAC_CENTRO = 128;          // codigo de reposo (0 V diferencial = 1.65 V aprox.)
 constexpr float DAC_GANANCIA = 127.0f;   // codigos por unidad de escala completa (+-1.0)
-constexpr size_t RING_SAMPLES = 4096;    // anillo de salida (potencia de 2): 256 ms
-constexpr size_t RING_PREFILL = 1024;    // muestras acumuladas antes de arrancar el DAC
-constexpr size_t DAC_CHUNK = 256;        // muestras por escritura al DMA
+// Dos salidas DAC simultaneas (el enunciado pide dos rutas independientes y dos salidas comparables):
+//   GPIO25 (DAC1): lo que se elige con 'mode' (por defecto la salida espectral del Nodo 3)
+//   GPIO26 (DAC2): siempre la salida temporal FIR del Nodo 2
+// El anillo y el DMA guardan cuadros intercalados [GPIO25, GPIO26] de 1 byte por canal.
+constexpr size_t CANALES_DAC = 2;
+constexpr size_t RING_SAMPLES = 4096;    // anillo en bytes (potencia de 2) = 2048 cuadros = 128 ms
+constexpr size_t RING_PREFILL = 1536;    // bytes (768 cuadros = 48 ms) antes de arrancar el DAC
+constexpr size_t DAC_CHUNK = 256;        // bytes por escritura al DMA (128 cuadros)
 constexpr int DAC_DESC_NUM = 4;          // descriptores DMA
-constexpr int DAC_DESC_BYTES = 512;      // 2 bytes por muestra de 8 bits => 256 muestras
-// Latencia del DMA = DAC_DESC_NUM * DAC_DESC_BYTES / 2 / FS = 64 ms
+constexpr int DAC_DESC_BYTES = 512;      // el driver usa 2 bytes por dato de 8 bits => 256 datos = 128 cuadros
+// Latencia del DMA = DAC_DESC_NUM * DAC_DESC_BYTES / 2 / CANALES_DAC / FS = 32 ms
 
 // ---- Metricas -------------------------------------------------------------
 constexpr int TEST_BLOQUES = 64;         // duracion de las pruebas del proyecto

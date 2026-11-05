@@ -42,7 +42,8 @@ void SpectralNode::advance(const float* nuevo, const Diag* diag, const Params& p
   fft_.forward(buf_);
 
   // 3. potencia y ganancia real por bin
-  const bool filtrar = diag && diag->piso_valido && p.modo == Modo::Filtro;
+  // la ruta espectral filtra siempre (las dos rutas se miden a la vez); 'bypass' deja G = 1
+  const bool filtrar = diag && diag->piso_valido && p.modo != Modo::Bypass;
   const float inv_norma = 1.0f / norma_;
   const float beta2 = p.beta * p.beta;
   for (int k = 0; k < NB; ++k) {
