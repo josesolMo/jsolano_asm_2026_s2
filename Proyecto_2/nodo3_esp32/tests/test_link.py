@@ -2,7 +2,7 @@
 
 Genera flujos con link.empaquetar() (PCM) y receptor_fft.empaquetar() (parametros del Nodo 1),
 los degrada (perdidas, errores de bit, basura, fragmentacion) y exige que el parser C++ acepte
-exactamente las tramas validas y ninguna danada. Uso (desde taller-fft-sys/):
+exactamente las tramas validas y ninguna danada. Uso (desde Proyecto_2/):
     python nodo3_esp32/tests/test_link.py
 """
 import os, subprocess, sys, tempfile, struct

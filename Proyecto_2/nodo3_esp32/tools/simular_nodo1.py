@@ -6,7 +6,7 @@ envia en tramas PCM (link.empaquetar) a ritmo real, mas las tramas de parametros
 y, opcionalmente, la extension PISO. Con --ref-port envia la senal limpia (referencia) por otro
 puerto, con la misma numeracion, para las metricas verdaderas.
 
-Ejemplos (desde taller-fft-sys/, con numpy, scipy y pyserial):
+Ejemplos (desde Proyecto_2/, con numpy, scipy y pyserial):
   python nodo3_esp32/tools/simular_nodo1.py --port /dev/ttyUSB1 --escenario P1
   python nodo3_esp32/tools/simular_nodo1.py --port /dev/ttyUSB1 --ref-port /dev/ttyUSB2 --escenario P5 --piso
   python nodo3_esp32/tools/simular_nodo1.py --out flujo.bin --escenario P2      # sin puerto: vuelca el flujo

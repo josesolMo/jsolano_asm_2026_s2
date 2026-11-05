@@ -2,7 +2,7 @@
 
 Compila tests/host_dsp.cpp con -DNODO3_HOST (mismo codigo del firmware, FFT radix-2 propia)
 y compara. NO ejecuta nada en la ESP32: valida la logica, no el hardware.
-Uso (desde taller-fft-sys/):  python nodo3_esp32/tests/test_dsp_vs_python.py
+Uso (desde Proyecto_2/):  python nodo3_esp32/tests/test_dsp_vs_python.py
 """
 import os, subprocess, sys, tempfile
 from pathlib import Path
