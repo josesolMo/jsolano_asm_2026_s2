@@ -202,6 +202,13 @@ class Receptor:
         """Marca cada frecuencia como útil, interferente y/o armónica (C5)."""
         lo, hi = self.banda_util
         df = self.fs / self.n
+        # Solo se reporta lo que está a menos de 40 dB del tono más fuerte: más abajo
+        # quedan residuos como los armónicos de cuantización de un DAC de 8 bits
+        # (~ -48 dB), que no vale la pena que el nodo 3 ataque. Es el mismo margen que
+        # usa C6 y que RANGO_PICO_DB de full_system/sistema_ruido/config.py.
+        if validadas:
+            minimo = max(p['amplitud'] for p in validadas) * 10 ** (-RANGO_RELATIVO_DB / 20)
+            validadas = [p for p in validadas if p['amplitud'] >= minimo]
         salida = []
         for p in validadas:
             flags = 0
