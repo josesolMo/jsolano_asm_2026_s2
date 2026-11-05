@@ -2,14 +2,14 @@
 """Emula al Nodo 1 para probar el Nodo 3 sin ese hardware.
 
 Genera el escenario Pn del proyecto (misma senal que full_system), lo cuantiza como el ADC y lo
-envia en tramas PCM (link.empaquetar) a ritmo real, mas las tramas de parametros (receptor_fft)
-y, opcionalmente, la extension PISO. Con --ref-port envia la senal limpia (referencia) por otro
+envia en tramas PCM (link.empaquetar) a ritmo real, mas las tramas de diagnostico A5 5B (formato de nodo1_esp32s3/trama.h)
+y, opcionalmente, la extension PISO (A5 5D). Con --ref-port envia la senal limpia (referencia) por otro
 puerto, con la misma numeracion, para las metricas verdaderas.
 
-Ejemplos (desde taller-fft-sys/, con numpy, scipy y pyserial):
-  python nodo3_esp32/tools/simular_nodo1.py --port /dev/ttyUSB1 --escenario P1
-  python nodo3_esp32/tools/simular_nodo1.py --port /dev/ttyUSB1 --ref-port /dev/ttyUSB2 --escenario P5 --piso
-  python nodo3_esp32/tools/simular_nodo1.py --out flujo.bin --escenario P2      # sin puerto: vuelca el flujo
+Ejemplos (desde la raiz del repositorio, con numpy, scipy y pyserial):
+  python Proyecto_2/nodo3_espectral/tools/simular_nodo1.py --port /dev/ttyUSB1 --escenario P1
+  python Proyecto_2/nodo3_espectral/tools/simular_nodo1.py --port /dev/ttyUSB1 --ref-port /dev/ttyUSB2 --escenario P5 --piso
+  python Proyecto_2/nodo3_espectral/tools/simular_nodo1.py --out flujo.bin --escenario P2      # sin puerto: vuelca el flujo
 Formato por defecto: cuenta cruda del ADC (0..4095), como el firmware actual del Nodo 1.
 Conexion: adaptador USB-UART 3.3 V: TX -> GPIO16 (RX2) de la ESP32 del Nodo 3, GND comun.
 """
@@ -26,10 +26,25 @@ from sistema_ruido.acquisition import NodoAdquisicion                        # n
 from receptor_fft.src import receptor_fft as rf                              # noqa: E402
 
 
-def trama_piso(sec, piso, decim=8):
+def _cerrar(sync1, cuerpo):
+    """Igual que trama::cerrar de nodo1_esp32s3/trama.h: SYNC + cuerpo + CRC16(cuerpo)."""
+    return bytes([0xA5, sync1]) + cuerpo + struct.pack("<H", link.crc16(cuerpo))
+
+
+def trama_diag(analisis, t_us, frec):
+    """Diagnostico del Nodo 1 (A5 5B), mismo formato que trama::empaquetarDiagnostico."""
+    sat = lambda v, lo, hi: int(round(min(max(v, lo), hi)))
+    cuerpo = struct.pack("<IHBB", analisis, t_us, len(frec), 0)
+    for f in frec:
+        cuerpo += struct.pack("<HHhB", sat(f["f_hz"] * 4, 0, 65535), sat(f["amplitud"] * 10000, 0, 65535),
+                              sat(f["snr_local_db"] * 10, -32768, 32767), f["flags"])
+    return _cerrar(0x5B, cuerpo)
+
+
+def trama_piso(analisis, piso, decim=8):
+    """EXTENSION propuesta (A5 5D): piso de ruido en centi-dB cada 'decim' bins."""
     cdb = np.round(100 * 10 * np.log10(np.maximum(piso[::decim], 1e-30))).astype("<i2")
-    cuerpo = bytes([0xA5, 0x5A, 0x03, sec & 0xFF, decim, len(cdb)]) + cdb.tobytes()
-    return cuerpo + struct.pack("<H", link.crc16(cuerpo))
+    return _cerrar(0x5D, struct.pack("<IBB", analisis, decim, len(cdb)) + cdb.tobytes())
 
 
 def main():
@@ -76,14 +91,13 @@ def main():
             diag = nodo1.procesar(x)
             datos = link.empaquetar(seq, bloque)
             if not a.sin_params:
-                frec = []
-                for h in range(2):                       # receptor_fft analiza ventanas de N con avance N/2
+                for h in range(2):                       # un analisis cada 512 muestras (32 ms), como el Nodo 1
                     ini = i * N + (h - 1) * (N // 2)
                     if ini >= 0:
                         frec = receptor.procesar(adc_q15[ini:ini + N].astype(np.float64) / 32768.0)
-                datos += rf.empaquetar(seq, frec)
+                        datos += trama_diag(2 * i + h, 4000, frec)
             if a.piso:
-                datos += trama_piso(seq, diag.piso)
+                datos += trama_piso(2 * i + 1, diag.piso)
             if salida:
                 salida.write(datos)
             else:

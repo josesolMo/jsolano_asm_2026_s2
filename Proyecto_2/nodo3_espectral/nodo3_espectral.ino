@@ -1,10 +1,11 @@
 // Nodo 3 - Filtrado espectral adaptativo FFT/IFFT y evaluacion (CE1110, Proyecto Grupal 1).
-// Placa: ESP32 Dev Module (ESP-WROOM-32). Nucleo: Arduino-ESP32 3.3.12. Ver README.md.
+// Carpeta: Proyecto_2/nodo3_espectral (junto a nodo1_esp32s3 y nodo2_temporal).
+// Placa: ESP32 Dev Module (ESP-WROOM-32). Nucleo: Arduino-ESP32 3.3.12. Ver docs/interfaz_nodos.md.
 //
 //   Nodo 1 --UART2--> [rx task] --cola--> [loop: FFT, filtro, IFFT, OLA] --anillo--> [dac task] --> GPIO25
 //
 // Estado de verificacion: el DSP, el parser y las metricas estan validados contra Python en el PC
-// (nodo3_esp32/tests). El comportamiento en la placa (tiempos, DAC, UART) NO esta medido.
+// (nodo3_espectral/tests). El comportamiento en la placa (tiempos, DAC, UART) NO esta medido.
 #include <Arduino.h>
 #include "esp_arduino_version.h"
 #include "esp_heap_caps.h"
@@ -48,9 +49,9 @@ static uint32_t g_bloques = 0, g_perdidos = 0, g_repetidos = 0, g_resync = 0, g_
 
 // diagnostico recibido del Nodo 1 (escrito por la tarea RX, leido por loop)
 static portMUX_TYPE g_mux = portMUX_INITIALIZER_UNLOCKED;
-static ParamsFrame g_ext_par; static PisoFrame g_ext_piso;
-static volatile uint32_t g_ext_par_blk = 0, g_ext_piso_blk = 0;
-static volatile bool g_ext_par_ok = false, g_ext_piso_ok = false;
+static DiagFrame g_ext_diag; static PisoFrame g_ext_piso;
+static volatile uint32_t g_ext_diag_blk = 0, g_ext_piso_blk = 0;
+static volatile bool g_ext_diag_ok = false, g_ext_piso_ok = false;
 static volatile uint32_t g_blk_actual = 0, g_ext_fallback = 0;
 
 static float g_dc_in = 0;                 // media de la ultima entrada (ya escalada): debe ser ~0
@@ -73,8 +74,8 @@ struct SinkN1 : FrameParser::Sink {
     memcpy(g_pool[idx].m, m, sizeof g_pool[idx].m);
     xQueueSend(g_llenos, &idx, 0);
   }
-  void on_params(const ParamsFrame& f) override {
-    portENTER_CRITICAL(&g_mux); g_ext_par = f; g_ext_par_blk = g_blk_actual; g_ext_par_ok = true; portEXIT_CRITICAL(&g_mux);
+  void on_diag(const DiagFrame& f) override {
+    portENTER_CRITICAL(&g_mux); g_ext_diag = f; g_ext_diag_blk = g_blk_actual; g_ext_diag_ok = true; portEXIT_CRITICAL(&g_mux);
   }
   void on_piso(const PisoFrame& f) override {
     portENTER_CRITICAL(&g_mux); g_ext_piso = f; g_ext_piso_blk = g_blk_actual; g_ext_piso_ok = true; portEXIT_CRITICAL(&g_mux);
@@ -114,13 +115,13 @@ static bool g_tiene_prev = false;
 // Sustituye el piso/interferentes locales por los del Nodo 1 cuando estan frescos (< 5 bloques).
 static void elegir_diagnostico(const float* x) {
   bool piso_ext = false, interf_ext = false;
-  ParamsFrame par{}; PisoFrame piso{};
+  DiagFrame par{}; PisoFrame piso{};
   if (g_p.fuente == FuenteDiag::Externo) {
     portENTER_CRITICAL(&g_mux);
     const bool pf = g_ext_piso_ok && g_blk_actual - g_ext_piso_blk < 5;
-    const bool qf = g_ext_par_ok && g_blk_actual - g_ext_par_blk < 5;
+    const bool qf = g_ext_diag_ok && g_blk_actual - g_ext_diag_blk < 5;
     if (pf) piso = g_ext_piso;
-    if (qf) par = g_ext_par;
+    if (qf) par = g_ext_diag;
     portEXIT_CRITICAL(&g_mux);
     piso_ext = pf; interf_ext = qf;
   }
@@ -228,8 +229,8 @@ static void imprimir_metricas() {
 
 static void imprimir_estado() {
   const LinkStats& a = g_parser_n1.stats();
-  Serial.printf("[ENLACE N1] bytes=%lu pcm_ok=%lu params=%lu piso=%lu crc_err=%lu bytes_basura=%lu\n",
-                (unsigned long)a.bytes, (unsigned long)a.pcm_ok, (unsigned long)a.params_ok, (unsigned long)a.piso_ok,
+  Serial.printf("[ENLACE N1] bytes=%lu pcm_ok=%lu diag=%lu piso=%lu crc_err=%lu bytes_basura=%lu\n",
+                (unsigned long)a.bytes, (unsigned long)a.pcm_ok, (unsigned long)a.diag_ok, (unsigned long)a.piso_ok,
                 (unsigned long)a.crc_err, (unsigned long)a.bytes_descartados);
   Serial.printf("[ENTRADA] DC de la ultima trama = %+.4f (escala completa 1.0; un DC alto desplaza la salida del DAC; ajuste 'set adcmid')\n", g_dc_in);
   Serial.printf("[BLOQUES] procesados=%lu perdidos=%lu rellenados=%lu repetidos=%lu resync=%lu desbordes_cola=%lu\n",
@@ -305,7 +306,7 @@ static void ayuda() {
     "  baud <n>                   velocidad de la UART2 (debe coincidir con el Nodo 1; defecto 921600)\n"
     "  src uart|gen               fuente: UART2 (Nodo 1) o generador interno\n"
     "  gen f1 a1 f2 a2 ruido      generador: dos tonos (Hz, amplitud 0-1) + ruido blanco (amplitud)\n"
-    "  gain <codigos>             ganancia del DAC (127 = escala completa), dac stop|start");
+    "  gain <codigos>             ganancia del DAC (60 = igual que el Nodo 2; 127 = escala completa), dac stop|start");
 }
 
 static void comando(char* l) {

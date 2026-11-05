@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Interfaz local minima: lee el monitor serial del Nodo 3 y muestra las lineas CSV "N3,..." en una tabla.
 
-Uso: python nodo3_esp32/tools/monitor_nodo3.py /dev/ttyUSB0 [--plot]
+Uso: python nodo3_espectral/tools/monitor_nodo3.py /dev/ttyUSB0 [--plot]
 En la consola de la placa (115200 baud) envie "stream on". Los demas comandos se escriben aqui tambien:
 cada linea que teclee se reenvia a la placa (p. ej. "set alfa 4", "scen P2", "metrics").
 """
