@@ -98,6 +98,16 @@ class PruebasPersistencia(unittest.TestCase):
         self.assertTrue(ultimo[0]['flags'] & FLAG_INTERFERENTE)  # interferentes primero
 
 
+class PruebasRango(unittest.TestCase):
+    def test_no_reporta_mas_de_40_db_abajo(self):
+        # Un tono 46 dB por debajo del principal se valida (C1-C4) pero no se reporta.
+        t = np.arange(N_BLOQUE + 4 * SALTO) / FS
+        x = 0.4 * np.sin(2 * np.pi * 2500 * t) + 0.002 * np.sin(2 * np.pi * 4000 * t)
+        reportadas = [round(s['f_hz']) for s in procesar_senal(x)[-1]]
+        self.assertIn(2500, reportadas)
+        self.assertNotIn(4000, reportadas)
+
+
 class PruebasEmisor(unittest.TestCase):
     def test_tabla_del_emisor(self):
         # Recibe 440 y 2500 (con error pequeño), falta 880 y llega un 3700 ajeno.

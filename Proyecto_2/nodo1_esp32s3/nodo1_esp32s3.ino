@@ -12,10 +12,17 @@
 //   e  estado (texto)     f  enviar el espectro del proximo bloque (validar la FFT)
 //   t  encender/apagar un tono de prueba de 1000 Hz (PWM) en GPIO5; con un jumper
 //      GPIO5 -> GPIO4 la placa se mide a si misma sin otro equipo
+// Parametros sin recompilar (terminar la linea con Enter):
+//   p              mostrar los parametros actuales
+//   u20            umbral C1 en dB sobre el piso (5 a 40)
+//   b340,1420      banda util en Hz (C5): lo que cae dentro no se reporta como ruido
+//   r40            rango de reporte en dB bajo el tono mas fuerte (10 a 80)
 //
 // En la PC: python nodo1_esp32s3/validar_nodo1.py --puerto COMx
 
 #include <Arduino.h>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include "esp_adc/adc_continuous.h"
 #include "trama.h"
@@ -103,11 +110,59 @@ void setup() {
     iniciarAdc();
 }
 
+void mostrarParametros() {
+    Serial.printf("\n#param umbral=%.1f dB banda=%.0f-%.0f Hz rango=%.1f dB\n",
+                  receptor.umbral_db, receptor.banda_lo, receptor.banda_hi, receptor.rango_db);
+}
+
+// Aplica un comando con valor ("u20", "b340,1420", "r40"); rechaza valores fuera de rango
+// para que un error de tipeo en la defensa no deje el nodo en un estado absurdo.
+void aplicarParametro(char comando, const char* valor) {
+    if (comando == 'u') {
+        const float v = atof(valor);
+        if (v >= 5.0f && v <= 40.0f) receptor.umbral_db = v;
+        else Serial.printf("\n#error umbral fuera de 5..40 dB: %s\n", valor);
+    } else if (comando == 'r') {
+        const float v = atof(valor);
+        if (v >= 10.0f && v <= 80.0f) receptor.rango_db = v;
+        else Serial.printf("\n#error rango fuera de 10..80 dB: %s\n", valor);
+    } else if (comando == 'b') {
+        float lo = 0.0f, hi = 0.0f;
+        if (sscanf(valor, "%f,%f", &lo, &hi) == 2 && lo >= 0.0f && hi <= FS / 2.0f && lo < hi) {
+            receptor.banda_lo = lo;
+            receptor.banda_hi = hi;
+        } else {
+            Serial.printf("\n#error banda invalida (use b<lo>,<hi> en Hz): %s\n", valor);
+        }
+    }
+    mostrarParametros();
+}
+
 // Los comandos se atienden entre lecturas; el script de la PC ignora el texto.
+// e, f, t y p actuan al instante; u, b y r esperan su valor hasta el Enter.
+char comandoPendiente = 0;
+char valorPendiente[24];
+size_t largoValor = 0;
+
 void atenderComandos() {
     while (Serial.available()) {
         const char c = Serial.read();
-        if (c == 'e') {
+        if (comandoPendiente) {
+            if (c == '\n' || c == '\r') {
+                valorPendiente[largoValor] = '\0';
+                aplicarParametro(comandoPendiente, valorPendiente);
+                comandoPendiente = 0;
+            } else if (largoValor < sizeof(valorPendiente) - 1) {
+                valorPendiente[largoValor++] = c;
+            }
+            continue;
+        }
+        if (c == 'u' || c == 'b' || c == 'r') {
+            comandoPendiente = c;
+            largoValor = 0;
+        } else if (c == 'p') {
+            mostrarParametros();
+        } else if (c == 'e') {
             Serial.printf("\n#estado fs=%lu N=%u tramas=%u analisis=%lu desbordes=%lu "
                           "t_max_us=%lu pistas_descartadas=%lu\n",
                           static_cast<unsigned long>(FS), static_cast<unsigned>(N),

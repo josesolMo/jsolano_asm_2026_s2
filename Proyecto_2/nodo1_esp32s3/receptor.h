@@ -23,6 +23,7 @@ constexpr float FS = 16000.0f;
 constexpr float DF = FS / N;          // 15.625 Hz por bin
 
 // Criterios (mismos valores que receptor_fft.py).
+// C5 incluye ademas el rango de 40 dB (RANGO_DB) antes de reportar.
 constexpr float UMBRAL_DB = 20.0f;    // C1
 constexpr int ANCHO_PISO = 31;        // bins de la ventana del piso
 constexpr int RANGO_PISO = 7;         // percentil 25 de 31 = octavo menor (indice 7)
@@ -36,6 +37,7 @@ constexpr int K_LIBERAR = 1;          // C4: histeresis
 constexpr int MAX_CANDIDATOS = 32;
 constexpr int MAX_PISTAS = 16;
 constexpr int MAX_REPORTADAS = 8;
+constexpr float RANGO_DB = 40.0f;     // solo se reporta lo que esta a < 40 dB del mas fuerte
 
 constexpr uint8_t FLAG_INTERFERENTE = 0x01;
 constexpr uint8_t FLAG_ARMONICO = 0x02;
@@ -62,6 +64,7 @@ public:
     float banda_lo = 340.0f;
     float banda_hi = 1420.0f;
     float umbral_db = UMBRAL_DB;
+    float rango_db = RANGO_DB;
 
     // Resultados del ultimo bloque.
     float potencia[BINS];        // |X[k]|^2
@@ -240,10 +243,17 @@ private:
 
     // C5: util / interferente / armonico; ordena y recorta a MAX_REPORTADAS.
     void clasificar() {
+        // Residuos a mas de rango_db del tono mas fuerte no se reportan (p. ej. los
+        // armonicos de cuantizacion de un DAC de 8 bits, ~ -48 dB).
+        float mayor = 0.0f;
+        for (int p = 0; p < n_pistas_; ++p) {
+            if (pistas_[p].validada) mayor = std::max(mayor, pistas_[p].amplitud);
+        }
+        const float minimo = mayor * std::pow(10.0f, -rango_db / 20.0f);
         Frecuencia todas[MAX_PISTAS];
         int n = 0;
         for (int p = 0; p < n_pistas_; ++p) {
-            if (!pistas_[p].validada) continue;
+            if (!pistas_[p].validada || pistas_[p].amplitud < minimo) continue;
             const Pista& s = pistas_[p];
             const bool util = s.f_hz >= banda_lo && s.f_hz <= banda_hi;
             todas[n++] = {s.f_hz, s.amplitud, s.snr_db, util ? FLAG_BANDA_UTIL : FLAG_INTERFERENTE};
