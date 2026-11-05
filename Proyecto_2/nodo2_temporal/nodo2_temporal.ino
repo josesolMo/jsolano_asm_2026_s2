@@ -3,12 +3,15 @@
 #include "filtro_fir.h"
 #include "coeficientes.h"
 
-// Diagnostico local: no adquiere ADC ni recibe SPI ni reproduce audio por DAC.
+// Diagnostico local: no adquiere ADC ni recibe SPI; la salida DAC es opcional por comando.
 // El impulso al final del primer bloque debe continuar en el bloque siguiente.
 constexpr size_t N = 1024;
 float entrada[N];
 float salida[N];
 temporal::FiltroFIR<temporal::MULTITONO.size()> filtro(temporal::MULTITONO);
+
+// La integracion usa los buffers y el FIR anteriores para preparar la salida de diagnostico.
+#include "salida_dac.h"
 
 // Consumir la salida impide que una optimizacion elimine el trabajo medido.
 volatile float comprobacionTiempo = 0.0f;
@@ -119,15 +122,23 @@ void probarFiltro() {
 void setup() {
     // El comando permite ejecutar despues de abrir el monitor, sin depender del arranque USB.
     Serial.begin(115200);
+    diagnostico_dac::detener();
+    Serial.println("t=impulso; m=tiempo; i=DAC local; p=parar; e=estado; ?=ayuda");
 }
 
 void loop() {
     // La prueba se inicia explicitamente y se puede repetir sin reiniciar la placa.
     if (Serial.available()) {
         const char comando = Serial.read();
-        if (comando == 't') probarFiltro();
-        else if (comando == 'm') medirTiempo();
-        else if (comando == '?') Serial.println("t=probar impulso; m=medir tiempo de los cuatro perfiles");
+        if (comando == 't') {
+            if (diagnostico_dac::detener()) probarFiltro();
+        } else if (comando == 'm') {
+            if (diagnostico_dac::detener()) medirTiempo();
+        } else if (comando == 'i') diagnostico_dac::iniciar();
+        else if (comando == 'p') diagnostico_dac::detener();
+        else if (comando == 'e') diagnostico_dac::estado();
+        else if (comando == '?') Serial.println("t=impulso; m=tiempo; i=DAC local; p=parar; e=estado");
     }
+    diagnostico_dac::atender();
     delay(1);
 }

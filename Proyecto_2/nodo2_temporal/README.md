@@ -1,6 +1,6 @@
 # Filtro temporal del nodo 2
 
-Primera implementacion independiente de SPI y DAC. Reutiliza las especificaciones
+Implementacion independiente de SPI, con diagnostico local de DAC. Reutiliza las especificaciones
 del prototipo `full_system/sistema_ruido/temporal_filters.py`: muestreo de 16000 Hz,
 transicion de 700 Hz, rizado maximo de 0.5 dB y rechazo minimo de 40 dB.
 El firmware del nodo 1 y el prototipo existente no se modifican.
@@ -52,8 +52,8 @@ y reiniciar introduce un transitorio. La seleccion durante operacion y la transi
 entre perfiles quedan para la integracion posterior.
 
 No se recorta ni normaliza cada bloque. Una entrada con pico 1 puede producir salida
-mayor que 1: `diseno.json` incluye la cota sum(abs(b)). El escalado, el retiro de DC
-del ADC, el margen de amplitud y la saturacion para DAC se resolveran en la integracion.
+mayor que 1: `diseno.json` incluye la cota sum(abs(b)). El retiro de DC del ADC
+queda para la integracion de adquisicion. La conversion DAC ya incluye margen y saturacion.
 La clase no usa Arduino, memoria dinamica ni dependencias externas.
 
 ## Reproduccion y validacion
@@ -104,6 +104,72 @@ indica margen del filtro aislado durante esas mediciones, no una garantia de tie
 real del sistema: falta incluir recepcion, conversion, DAC y sus buffers. Este
 diagnostico tampoco reproduce muestras a 16 kHz ni mide latencia de extremo a extremo.
 El maximo observado no es una cota formal del peor caso.
+
+## Salida DAC local por GPIO25
+
+Requiere ESP32 clasico (ESP32 Dev Module) y Arduino-ESP32 3.3.12, con alineacion
+automatica DMA de 16 bits habilitada en el paquete. No es compatible con el
+ESP32-S3 del nodo 1, que no tiene este DAC. Se usa DAC_CHAN_0 (GPIO25), APLL y
+16000 muestras/s nominales. La tasa real requiere medicion externa.
+
+`conversion_dac.h` convierte muestras centradas en cero mediante
+codigo = redondear(128 + 60 * muestra), con saturacion a [0, 255]. La escala fija
+evita normalizacion por bloques. Para entradas al FIR de pico <= 1 y estado inicial
+cero, la mayor cota de salida entre los perfiles es 1.865; 60 * 1.865 < 127 deja
+margen a ambos lados del centro. Se cuentan las muestras saturadas antes de
+redondear. NaN o infinito producen codigo 128 y aumentan un contador independiente.
+Los contadores de conversion se reinician al iniciar una reproduccion; los errores
+API se acumulan desde el arranque.
+
+| Comando | Accion |
+|---|---|
+| `i` | Prepara y reproduce el diagnostico filtrado desde cero |
+| `p` | Cancela DMA, libera el canal continuo y fija el codigo 128 |
+| `e` | Muestra progreso, recortes, entradas no finitas y errores DMA/API |
+| `t` o `m` | Detiene DAC antes de ejecutar las pruebas previas |
+
+El diagnostico genera 65536 muestras (4.096 s) de 1000 Hz a amplitud 0.6 y
+2500 Hz a amplitud 0.3, con rampas de 20 ms. Pasa por el FIR MULTITONO, que conserva
+1000 Hz y rechaza 2500 Hz. Agrega 1024 muestras para vaciar el historial y terminar
+centrado: 66560 muestras, 4.160 s nominales en total. El arreglo uint8_t ocupa
+66560 bytes, ademas de 16384 bytes de buffers DMA y los recursos del driver.
+
+`salida_dac.h` reutiliza el ciclo de vida del DAC del emisor del taller. Los bloques
+preparados se cargan a DMA; el hardware temporiza las conversiones.
+Las escrituras al driver son de hasta 8192 muestras (512 ms nominales), para
+alimentar varios descriptores por llamada. El FIR sigue procesando bloques de
+1024 muestras. La ultima escritura se ajusta a las muestras pendientes. Las
+escrituras pueden bloquear mientras se libera espacio DMA; los comandos se
+atienden entre llamadas, por lo que este diagnostico no garantiza parada inmediata.
+La ISR registra longitudes notificadas por los eventos y finales. El conteo de
+eventos se conserva como diagnostico: no se usa como medicion fisica ni como
+condicion unica de error. El driver devuelve descriptores a su cola antes de leer
+la longitud que entrega al callback, por lo que su reutilizacion puede afectar
+esa suma. La tarea exige toda la captura cargada y un unico fin de cadena;
+un cierre previo o multiples cierres registran discontinuidad. El campo
+`Completadas al cierre de cadena` expresa la confirmacion de la cadena cargada
+por `on_stop`, no una medicion independiente. Las escrituras parciales y fallos API tambien
+se reportan. El reposo se confirma por API, no por medicion de tension.
+
+Esta etapa reproduce una captura preparada localmente: no implementa todavia
+recepcion SPI ni filtrado concurrente con la reproduccion. No demuestra tiempo real
+de extremo a extremo. Al enviar `e` tras la finalizacion se esperan 66560 muestras
+cargadas y completadas al cierre, cero recortes, cero entradas no finitas y cero
+agotamientos. El conteo bruto de eventos puede diferir y se muestra por separado.
+Un error de continuidad no se presenta como fallo de una API; anteriormente el
+diagnostico generaba artificialmente ESP_ERR_INVALID_STATE al diferir la suma.
+
+Para inspeccion fisica usar GPIO25 y GND con osciloscopio o entrada de alta
+impedancia. El codigo 128 corresponde aproximadamente a media escala. La conexion
+a audio requiere filtro analogico de reconstruccion, acoplamiento que retire DC
+y una entrada amplificada adecuada; no conectar un parlante directamente al GPIO.
+El filtro analogico y su caracterizacion quedan pendientes.
+
+`validacion/test_conversion_dac.cpp` verifica escala, extremos, entradas no finitas,
+acumulacion de recortes y la cota de margen de los cuatro perfiles. Se compila con
+g++ o clang++ en escritorio. La integracion tambien se comprobo en sintaxis con
+el compilador Xtensa y encabezados oficiales de Arduino-ESP32 3.3.12; falta la
+compilacion completa desde Arduino IDE y la verificacion fisica en placa.
 
 ## Modelo y recursos
 
