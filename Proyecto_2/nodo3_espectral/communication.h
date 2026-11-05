@@ -1,11 +1,12 @@
-// Enlace cableado: CRC-16, parser de tramas y recepcion UART (sin bloqueos).
+// Enlace entre nodos: CRC-16, parser de tramas y recepcion de bytes.
 //
-// Tramas (little-endian, todas con SYNC A5 5A y CRC-16/CCITT-FALSE sobre todo lo anterior al CRC,
-// SYNC incluido en las de parametros; en las PCM el CRC cubre desde seq, igual que link.py):
-//  PCM     [A5 5A][seq u16][n u16 = 1024][n x int16][crc u16]            link.empaquetar()
-//  PARAMS  [A5 5A][02][sec u8][n u8][n x (f*4 u16, snr i8, flags u8)][crc u16]
-//                                                                         receptor_fft.empaquetar()
-//  PISO    [A5 5A][03][sec u8][decim u8][nk u8][nk x i16 centi-dB][crc u16]   EXTENSION (a coordinar)
+// Las tramas son las del Nodo 1 (Proyecto_2/nodo1_esp32s3/trama.h), little-endian, CRC-16/CCITT-FALSE
+// calculado desde el byte 2 (sin los dos de sincronia) hasta el final de los datos:
+//  PCM   [A5 5A][seq u16][n u16 = 1024][n x int16][CRC]                              link.py / trama::empaquetar
+//  DIAG  [A5 5B][analisis u32][t_us u16][n u8][0][n x (f*4 u16, amp*1e4 u16, snr*10 i16, flags u8)][CRC]
+//  PISO  [A5 5D][analisis u32][decim u8][nk u8][nk x int16 centi-dB][CRC]            EXTENSION propuesta
+// Una trama [A5 5C] (espectro, solo a peticion del Nodo 1) no se usa: se descarta byte a byte.
+// El medio fisico (UART hoy; SPI previsto por el Nodo 1) no cambia el formato.
 #pragma once
 #include "config.h"
 
@@ -14,18 +15,20 @@ namespace n3 {
 // CRC-16/CCITT-FALSE (poli 0x1021, init 0xFFFF). crc16("123456789") == 0x29B1.
 uint16_t crc16(const uint8_t* datos, size_t n, uint16_t crc = 0xFFFF);
 
-struct FreqParam {
+struct FreqDiag {
   float f_hz;
-  int8_t snr_db;
+  float amplitud;
+  float snr_db;
   uint8_t flags;      // 0x01 interferente, 0x02 armonico, 0x04 banda util
 };
-struct ParamsFrame {
-  uint8_t sec;
+struct DiagFrame {
+  uint32_t analisis;  // contador de analisis del Nodo 1 (uno cada 32 ms)
+  uint16_t t_us;
   uint8_t n;
-  FreqParam f[MAX_FREQ];
+  FreqDiag f[MAX_FREQ];
 };
 struct PisoFrame {
-  uint8_t sec;
+  uint32_t analisis;
   uint8_t decim;
   uint8_t nk;
   int16_t centi_db[PISO_MAX_KNOTS];
@@ -33,7 +36,7 @@ struct PisoFrame {
 
 struct LinkStats {
   uint32_t bytes = 0;
-  uint32_t pcm_ok = 0, params_ok = 0, piso_ok = 0;
+  uint32_t pcm_ok = 0, diag_ok = 0, piso_ok = 0;
   uint32_t crc_err = 0;           // tramas completas con CRC incorrecto
   uint32_t bytes_descartados = 0; // bytes ignorados mientras se busca SYNC
 };
@@ -44,7 +47,7 @@ class FrameParser {
   struct Sink {
     // 'muestras' apunta al buffer interno: copiar antes de volver.
     virtual void on_pcm(uint16_t seq, const int16_t* muestras) = 0;
-    virtual void on_params(const ParamsFrame&) {}
+    virtual void on_diag(const DiagFrame&) {}
     virtual void on_piso(const PisoFrame&) {}
   };
   void feed(const uint8_t* datos, size_t n, Sink& sink);
@@ -54,7 +57,7 @@ class FrameParser {
  private:
   void step(Sink& sink);
   void drop(size_t n, bool descartar = true);
-  size_t expected() const;        // 0 = tipo desconocido, SIZE_MAX = faltan bytes
+  size_t expected() const;        // 0 = invalida, SIZE_MAX = faltan bytes para saberlo
   alignas(4) uint8_t buf_[MAX_FRAME];
   size_t len_ = 0;
   LinkStats st_;
@@ -74,7 +77,7 @@ class SeqTracker {
 
 // Construccion de tramas (usada por las pruebas y por el modo de autoprueba).
 size_t build_pcm(uint8_t* out, uint16_t seq, const int16_t* muestras);
-size_t build_params(uint8_t* out, uint8_t sec, const FreqParam* f, uint8_t n);
-size_t build_piso(uint8_t* out, uint8_t sec, uint8_t decim, const int16_t* centi_db, uint8_t nk);
+size_t build_diag(uint8_t* out, uint32_t analisis, uint16_t t_us, const FreqDiag* f, uint8_t n);
+size_t build_piso(uint8_t* out, uint32_t analisis, uint8_t decim, const int16_t* centi_db, uint8_t nk);
 
 }  // namespace n3

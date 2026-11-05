@@ -33,10 +33,12 @@ constexpr float BANDA_LO = 900.0f, BANDA_HI = 1100.0f;
 constexpr float RINT_LO = 2485.0f, RINT_HI = 2515.0f;
 
 // ---- Enlace UART ----------------------------------------------------------
-constexpr uint8_t SYNC0 = 0xA5, SYNC1 = 0x5A;
-constexpr uint8_t TIPO_PARAMS = 0x02;    // trama del Nodo 1 (receptor_fft.empaquetar)
-constexpr uint8_t TIPO_PISO = 0x03;      // EXTENSION propuesta: piso de ruido submuestreado
-constexpr int MAX_FREQ = 8;              // frecuencias por trama de parametros
+constexpr uint8_t SYNC0 = 0xA5;
+// El segundo byte de sincronia identifica la trama, como en nodo1_esp32s3/trama.h:
+constexpr uint8_t SYNC1_PCM = 0x5A;      // muestras (link.py / trama::empaquetar)
+constexpr uint8_t SYNC1_DIAG = 0x5B;     // diagnostico del Nodo 1 (trama::empaquetarDiagnostico)
+constexpr uint8_t SYNC1_PISO = 0x5D;     // EXTENSION propuesta: piso de ruido submuestreado (0x5C = espectro del Nodo 1, se ignora)
+constexpr int MAX_FREQ = 8;              // frecuencias por trama de diagnostico (MAX_REPORTADAS del Nodo 1)
 constexpr int PISO_DECIM_MAX = 64;
 constexpr int PISO_MAX_KNOTS = 129;      // 513 bins / decimacion 4 como minimo
 constexpr size_t MAX_FRAME = 2 + 2 + 2 + 2 * N + 2;  // trama PCM completa = 2056 bytes
@@ -53,7 +55,7 @@ constexpr int PIN_TX_REF = 19;           // UART1 TX  (sin uso)
 
 // ---- Salida DAC -----------------------------------------------------------
 constexpr int DAC_CENTRO = 128;          // codigo de reposo (0 V diferencial = 1.65 V aprox.)
-constexpr float DAC_GANANCIA = 127.0f;   // codigos por unidad de escala completa (+-1.0)
+constexpr float DAC_GANANCIA = 60.0f;    // codigo = 128 + 60 x, la misma escala que el Nodo 2 (conversion_dac.h)
 constexpr size_t RING_SAMPLES = 4096;    // anillo de salida (potencia de 2): 256 ms
 constexpr size_t RING_PREFILL = 1024;    // muestras acumuladas antes de arrancar el DAC
 constexpr size_t DAC_CHUNK = 256;        // muestras por escritura al DMA

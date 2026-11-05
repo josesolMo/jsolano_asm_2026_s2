@@ -4,7 +4,7 @@
 #   PY=.venv/bin/python ./ejecutar_pruebas.sh
 set -euo pipefail
 PY="${PY:-python3}"
-RAIZ="$(cd "$(dirname "$0")/.." && pwd)"          # taller-fft-sys/
+RAIZ="$(cd "$(dirname "$0")/.." && pwd)"          # Proyecto_2/
 cd "$RAIZ"
-"$PY" nodo3_esp32/tests/test_link.py
-"$PY" nodo3_esp32/tests/test_dsp_vs_python.py
+"$PY" nodo3_espectral/tests/test_link.py
+"$PY" nodo3_espectral/tests/test_dsp_vs_python.py

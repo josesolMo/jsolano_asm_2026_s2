@@ -31,13 +31,13 @@ $\alpha$, $\beta$, la ganancia de rechazo y el ancho del rechazo se modifican en
 \paragraph{Enlace y datos que requiere el nodo.}
 Las tramas PCM siguen el formato del proyecto (\texttt{A5 5A}, secuencia de 16 bits, longitud, muestras, CRC-16/CCITT-FALSE).
 Cada trama ocupa 2056 bytes, es decir $321{,}25\,\mathrm{kb/s}$ netos en 8N1, lo que equivale a $69{,}7\,\%$ de un enlace de
-$460800\,\mathrm{baud}$ y $34{,}9\,\%$ de uno de $921600\,\mathrm{baud}$. La trama de par\'ametros del Nodo 1 contiene frecuencias
+$460800\,\mathrm{baud}$ y $34{,}9\,\%$ de uno de $921600\,\mathrm{baud}$. La trama de diagn\'ostico del Nodo 1 contiene frecuencias
 interferentes pero \emph{no} el piso de ruido por bin que exige la ganancia anterior. Por ello el Nodo 3 puede (a) estimar el piso
-por s\'i mismo con el mismo algoritmo del Nodo 1, o (b) recibir una extensi\'on propuesta que transmite el piso en decibelios
+por s\'i mismo con el mismo algoritmo del Nodo 1, o (b) recibir una extensi\'on propuesta (trama \texttt{A5 5D}) que transmite el piso en decibelios
 sobre 65 nudos (cada 8 bins); esta extensi\'on requiere acuerdo con el responsable del Nodo 1.
 
 \paragraph{Salida y evaluaci\'on.}
-La salida se escala a $128+127\,y$ y se satura a $[0,255]$; un DAC continuo temporizado por hardware (reloj APLL, DMA) la
+La salida se escala a $128+60\,y$ y se satura a $[0,255]$; un DAC continuo temporizado por hardware (reloj APLL, DMA) la
 reproduce a $16\,\mathrm{kHz}$ independientemente del tiempo de c\'alculo, a trav\'es de un anillo de 4096 muestras. Debe seguirse de un
 filtro paso bajo de reconstrucci\'on. Con referencia limpia alineada se calculan
 $\mathrm{MSE}=\overline{(s-\hat{s})^2}$, $\mathrm{SNR}=10\log_{10}\!\big(\sum s^2/\sum(s-\hat{s})^2\big)$, la mejora de SNR y la
@@ -50,7 +50,7 @@ El mismo c\'odigo C++ del firmware, compilado en la computadora, se compar\'o co
 FFT respecto de \texttt{numpy} es $1{,}4\times10^{-7}$ (relativo), la reconstrucci\'on en bypass tiene error m\'aximo
 $1{,}8\times10^{-7}$ (escala $\pm1$) y las salidas filtradas de los escenarios P1, P2 y P5 difieren en menos de $3\times10^{-7}$.
 El analizador de tramas acepta exactamente las mismas tramas v\'alidas que la referencia en Python bajo p\'erdidas y errores de bit
-simulados. El sketch compila para ESP32 Dev Module y ocupa 338\,888 bytes de programa y 123\,956 bytes de variables globales.
+simulados. El sketch compila para ESP32 Dev Module y ocupa 338\,956 bytes de programa y 124\,020 bytes de variables globales.
 \textbf{No se han realizado mediciones en la placa}: los tiempos de procesamiento, el uso de memoria en ejecuci\'on, la latencia
 total, la fidelidad del DAC y el comportamiento real de la UART quedan pendientes.
 
@@ -59,11 +59,11 @@ total, la fidelidad del DAC y el comportamiento real de la UART quedan pendiente
   \caption{Resultados de \emph{simulaci\'on} en computadora (C++ del firmware, 64 bloques). El DAC real es de 8 bits.}
   \begin{tabular}{lrrrr}
     \toprule
-    Escenario & SNR entrada (dB) & SNR salida (dB) & Mejora (dB) & SNR salida, 8 bits (dB) \\
+    Escenario & SNR entrada (dB) & SNR salida (dB) & Mejora (dB) & SNR salida, DAC de 8 bits (dB) \\
     \midrule
-    P1 & 5,03 & 43,75 & 38,73 & 41,30 \\
-    P2 & 0,03 & 12,47 & 12,45 & 12,45 \\
-    P5 & 0,01 &  9,93 &  9,91 &  9,92 \\
+    P1 & 5,03 & 43,75 & 38,73 & 38,19 \\
+    P2 & 0,03 & 12,47 & 12,45 & 12,39 \\
+    P5 & 0,01 &  9,93 &  9,91 &  9,88 \\
     \bottomrule
   \end{tabular}
 \end{table}
