@@ -82,6 +82,29 @@ comprueban reinicio, llamada vacia, simetria de coeficientes y especificaciones 
 una malla densa que incluye los bordes y Nyquist. Las particiones producen salidas
 identicas bit a bit. Son pruebas de escritorio, no mediciones del hardware.
 
+## Diagnostico en Arduino IDE
+
+Abrir `nodo2_temporal.ino`, seleccionar la placa y el puerto y cargarlo. En el
+monitor serial a 115200 baudios, enviar `t` para la prueba del impulso o `m` para
+medir los cuatro perfiles. `?` muestra los comandos. No se necesitan conexiones
+externas para estas pruebas.
+
+La medicion usa `micros()` alrededor de `procesar()`, con interrupciones habilitadas,
+10 bloques de calentamiento y 200 bloques medidos por perfil. Informa minimo,
+promedio y maximo en microsegundos, porcentaje del presupuesto de 64000 us y
+cantidad de bloques que alcanzan o exceden ese presupuesto. La salida se consume
+fuera del intervalo cronometrado para evitar eliminar el calculo por optimizacion.
+La generacion de entrada, verificacion, salida serial y `delay(1)` quedan fuera.
+El historial se mantiene entre iteraciones.
+
+Para evaluar el resultado, guardar el reporte completo junto con el modelo de placa,
+version de Arduino-ESP32 y frecuencia de CPU seleccionada en el IDE. Conviene repetir
+`m` tres veces y revisar el mayor maximo observado. Un maximo inferior a 64000 us
+indica margen del filtro aislado durante esas mediciones, no una garantia de tiempo
+real del sistema: falta incluir recepcion, conversion, DAC y sus buffers. Este
+diagnostico tampoco reproduce muestras a 16 kHz ni mide latencia de extremo a extremo.
+El maximo observado no es una cota formal del peor caso.
+
 ## Modelo y recursos
 
 Para cada perfil, los coeficientes de `diseno.json` definen
