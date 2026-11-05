@@ -117,4 +117,48 @@ inline size_t empaquetarEspectro(uint32_t analisis, const float* x, const float*
     }
     return cerrar(destino, SYNC_ESPECTRO, 6 + 4 * n + 4 * (n / 2 + 1));
 }
+
+// ---- Tramas hacia el nodo 3 (UART), formato de nodo3_esp32/communication.h ----
+// A diferencia de la trama PCM, aqui el CRC cubre TODO lo anterior, SYNC incluido.
+//   PARAMS [A5 5A][02][sec u8][n u8][n x (f*4 u16, snr i8, flags u8)][CRC]
+//   PISO   [A5 5A][03][sec u8][decim u8][nk u8][nk x i16 centi-dB][CRC]
+constexpr uint8_t TIPO_PARAMS = 0x02;
+constexpr uint8_t TIPO_PISO = 0x03;
+constexpr size_t tamanoParams(size_t n) { return 7 + 4 * n; }
+constexpr size_t tamanoPiso(size_t nk) { return 8 + 2 * nk; }
+
+template <typename Frecuencia>
+inline size_t empaquetarParams(uint8_t sec, const Frecuencia* f, size_t n, uint8_t* destino) {
+    destino[0] = SYNC0;
+    destino[1] = SYNC1;
+    destino[2] = TIPO_PARAMS;
+    destino[3] = sec;
+    destino[4] = static_cast<uint8_t>(n);
+    uint8_t* p = destino + 5;
+    for (size_t i = 0; i < n; ++i, p += 4) {
+        poner16(p, saturar16(f[i].f_hz * 4.0f, 0.0f, 65535.0f));
+        float s = f[i].snr_db;
+        if (s > 127.0f) s = 127.0f;
+        if (s < -128.0f) s = -128.0f;
+        p[2] = static_cast<uint8_t>(static_cast<int8_t>(s >= 0 ? s + 0.5f : s - 0.5f));
+        p[3] = f[i].flags;
+    }
+    const size_t t = tamanoParams(n);
+    poner16(destino + t - 2, crc16(destino, t - 2));
+    return t;
+}
+
+inline size_t empaquetarPiso(uint8_t sec, uint8_t decim, const int16_t* centi_db, size_t nk,
+                             uint8_t* destino) {
+    destino[0] = SYNC0;
+    destino[1] = SYNC1;
+    destino[2] = TIPO_PISO;
+    destino[3] = sec;
+    destino[4] = decim;
+    destino[5] = static_cast<uint8_t>(nk);
+    for (size_t i = 0; i < nk; ++i) poner16(destino + 6 + 2 * i, static_cast<uint16_t>(centi_db[i]));
+    const size_t t = tamanoPiso(nk);
+    poner16(destino + t - 2, crc16(destino, t - 2));
+    return t;
+}
 }  // namespace trama
