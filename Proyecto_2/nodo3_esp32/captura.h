@@ -19,7 +19,7 @@ namespace n3 {
 
 constexpr uint8_t SYNC_CAPTURA = 0x5D;
 constexpr size_t CAPTURA_ENCABEZADO = 20;
-constexpr size_t CAPTURA_MAX_BLOQUES = 8;
+constexpr size_t CAPTURA_MAX_BLOQUES = 16;     // ~1 s; 16 bloques = ~100 KB de heap mientras dura
 
 inline size_t captura_offset_muestras() { return CAPTURA_ENCABEZADO + 2 * MAX_INTERF + 2 * NB; }
 inline size_t captura_tamano(size_t n) { return captura_offset_muestras() + 3 * 2 * n + 2; }

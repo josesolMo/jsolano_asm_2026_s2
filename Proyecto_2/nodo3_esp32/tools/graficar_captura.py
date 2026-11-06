@@ -7,10 +7,12 @@ ocurre en la placa.
 
 Uso (cerrar antes el monitor serie del nodo 3):
     python nodo3_esp32/tools/graficar_captura.py COM7                 # 4 bloques (256 ms)
-    python nodo3_esp32/tools/graficar_captura.py COM7 --bloques 8
+    python nodo3_esp32/tools/graficar_captura.py COM7 --bloques 16    # ~1 s, para escuchar
     python nodo3_esp32/tools/graficar_captura.py --archivo nodo3_esp32/capturas/captura_....bin
 
-Guarda la trama (.bin) y la figura (.png) en nodo3_esp32/capturas/.
+Guarda la trama (.bin), la figura (.png) y tres audios (.wav: entrada, espectral, fir) en
+nodo3_esp32/capturas/. Los .wav son las muestras que calculo la placa ANTES del DAC: si en la
+computadora suenan limpios y en el parlante no, el ruido lo agrega el DAC/amplificador/parlante.
 Figura: (1) formas de onda completas, (2) acercamiento de 30 ms, (3) espectros con el piso del
 Nodo 1, la banda util (verde), el rango de interferencia (rojo) y los interferentes (lineas).
 """
@@ -50,7 +52,7 @@ def buscar_trama(buf: bytes):
         if i < 0 or len(buf) - i < ENC:
             return None, buf
         n = struct.unpack_from("<H", buf, i + 8)[0]
-        if not (N <= n <= 8 * N and n % N == 0):
+        if not (N <= n <= 16 * N and n % N == 0):
             i += 1
             continue
         t = tamano(n)
@@ -98,6 +100,21 @@ def resumen(c):
     return filas
 
 
+def guardar_wav(c, base, repeticiones):
+    """Tres .wav a 16 kHz (entrada, espectral, fir), con la misma escala para comparar volumenes y
+    repetidos 'repeticiones' veces para que la captura (<= 1 s) se pueda escuchar con calma."""
+    import wave
+    pico = max(np.abs(c[k]).max() for k in ("x", "esp", "fir")) or 1.0
+    g = 0.9 / pico
+    for clave, nombre in (("x", "entrada"), ("esp", "espectral"), ("fir", "fir")):
+        v = np.tile(np.clip(c[clave] * g, -1, 1), repeticiones)
+        ruta = Path(f"{base}_{nombre}.wav")
+        with wave.open(str(ruta), "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(c["fs"])
+            w.writeframes(np.round(v * 32767).astype("<i2").tobytes())
+        print(f"Audio guardado en {ruta}")
+
+
 def graficar(c, png, mostrar):
     import matplotlib
     if not mostrar:
@@ -141,7 +158,8 @@ def graficar(c, png, mostrar):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("puerto", nargs="?")
-    ap.add_argument("--bloques", type=int, default=4, help="1 a 8 bloques de 1024 (64 ms cada uno)")
+    ap.add_argument("--bloques", type=int, default=4, help="1 a 16 bloques de 1024 (64 ms cada uno)")
+    ap.add_argument("--repetir", type=int, default=5, help="veces que se repite la captura en los .wav")
     ap.add_argument("--archivo", help="grafica una captura guardada en vez de pedirla a la placa")
     ap.add_argument("--sin-mostrar", action="store_true", help="solo guarda la figura")
     a = ap.parse_args()
@@ -166,6 +184,7 @@ def main():
         ser.close()
         if trama is None:
             sys.exit("no llego una captura valida (el nodo 3 esta procesando bloques? 'src uart' con el nodo 1 o 'src gen')")
+        # con 16 bloques la trama pesa ~100 KB: a 115200 baud tarda ~9 s
         base = CARPETA / f"captura_{datetime.now():%Y%m%d_%H%M%S}"
         base.with_suffix(".bin").write_bytes(trama)
         print(f"Captura guardada en {base.with_suffix('.bin')}")
@@ -175,6 +194,7 @@ def main():
     print(f"{'':40s}{'espectral (N3)':>16s}{'FIR (N2)':>12s}")
     for nombre, e, fi in resumen(c):
         print(f"{nombre:40s}{e:16.1f}{fi:12.1f}")
+    guardar_wav(c, base, max(1, a.repetir))
     graficar(c, base.with_suffix(".png"), not a.sin_mostrar)
 
 

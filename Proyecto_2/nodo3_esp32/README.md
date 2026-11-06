@@ -117,6 +117,11 @@ dos rutas independientes y dos salidas comparables en un mismo ESP32, como permi
 alternado (`DAC_CHANNEL_MODE_ALTER`); si un tono sonara una octava abajo y el anillo se llenara, `dac x2` corrige la
 frecuencia.
 
+`hpf <Hz>` (`pasa_altos.h`, por defecto **0**): pasa altos extra a la entrada. El pasa altos de 100 Hz va en el **Nodo 1**
+(`h100`), antes del análisis: así el piso que envía el Nodo 1 y la señal que filtra este nodo son la misma. Con el filtro solo
+aquí, el piso del Nodo 1 quedaba inflado por graves que esta señal ya no tenía y la resta espectral se comía la banda útil
+(1 % de energía conservada en una captura).
+
 `captura [bloques]` (`captura.h`) envía por USB un tramo de la entrada y de las dos salidas tal como las calculó el micro,
 con el piso y los interferentes vigentes; `python nodo3_esp32/tools/graficar_captura.py COM7` lo pide, guarda la trama y
 grafica formas de onda y espectros, con la atenuación y la energía conservada de cada método (evidencia de P1–P5).

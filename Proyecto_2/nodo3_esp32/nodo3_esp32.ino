@@ -20,6 +20,7 @@
 #include "salida_fir.h"
 #include "recomendacion.h"
 #include "captura.h"
+#include "pasa_altos.h"
 #include <new>
 
 #if !CONFIG_IDF_TARGET_ESP32
@@ -45,6 +46,8 @@ static AudioOut g_audio;
 static SalidaFir* g_fir = nullptr;        // filtro temporal (Nodo 2) para 'mode fir'
 static StatsSenales* g_stats_fir = nullptr;   // metricas espectrales de la salida FIR
 static Metrics* g_met_fir = nullptr;      // metricas de la ruta temporal (Nodo 2)
+static PasaAltos g_hpf;                   // acondicionamiento de entrada ('hpf <Hz>')
+constexpr float HPF_DEFECTO_HZ = 0.0f;   // el pasa altos va en el Nodo 1 (h100): aqui apagado para no filtrar dos veces
 
 // 'captura': graba un tramo de entrada + las dos salidas y lo envia por USB sin bloquear el proceso.
 enum class EstadoCaptura : uint8_t { Libre, Grabando, Enviando };
@@ -132,7 +135,10 @@ static bool g_tiene_prev = false;
 static void elegir_diagnostico(const float* x) {
   bool piso_ext = false, interf_ext = false;
   ParamsFrame par{}; PisoFrame piso{};
-  if (g_p.fuente == FuenteDiag::Externo) {
+  // Con el generador interno el diagnostico del Nodo 1 describe el microfono, no esta senal:
+  // se usa siempre el local (si no, el parlante, el microfono y el filtro forman un lazo).
+  const bool usar_ext = g_p.fuente == FuenteDiag::Externo && !g_fuente_interna;
+  if (usar_ext) {
     portENTER_CRITICAL(&g_mux);
     const bool pf = g_ext_piso_ok && g_blk_actual - g_ext_piso_blk < 5;
     const bool qf = g_ext_par_ok && g_blk_actual - g_ext_par_blk < 5;
@@ -142,7 +148,7 @@ static void elegir_diagnostico(const float* x) {
     piso_ext = pf; interf_ext = qf;
   }
   if (!(piso_ext && interf_ext)) {
-    if (g_p.fuente == FuenteDiag::Externo) g_ext_fallback = g_ext_fallback + 1;
+    if (usar_ext) g_ext_fallback = g_ext_fallback + 1;
     g_dlocal.process(x, g_p, g_diag);          // estimador propio (replica del Nodo 1)
   }
   if (piso_ext) diag_set_piso_knots(g_diag, piso.centi_db, piso.nk, piso.decim);
@@ -191,10 +197,27 @@ static void procesar_float(const float* x, const float* s /* referencia o nullpt
   }
 }
 
+// Reinicia la historia del proceso (secuencia, filtros, alineacion) tras un corte de la fuente.
+static void resincronizar() {
+  g_seq.reset();
+  g_nodo.reset(); g_dlocal.reset(); g_fir->reiniciar(); g_stats_fir->reset(); g_tiene_prev = false;
+  g_hpf.reset();
+  ++g_resync;
+}
+
 static void procesar_bloque(const Bloque& b) {
   const uint32_t t0 = micros();
-  const int perdidos = g_seq.on_seq(b.seq, 65536);
-  if (perdidos < 0) { ++g_repetidos; return; }                   // repetido / fuera de orden
+  static uint32_t repetidos_seguidos = 0;
+  int perdidos = g_seq.on_seq(b.seq, 65536);
+  if (perdidos < 0) {                                            // repetido / fuera de orden
+    ++g_repetidos;
+    // Varios "viejos" seguidos no son duplicados: la fuente se reinicio (Nodo 1 recargado o cambio de
+    // 'src') y volvio a contar desde 0. Sin esto se descartaria todo hasta dar la vuelta (70 min).
+    if (++repetidos_seguidos < 3) return;
+    resincronizar();
+    perdidos = g_seq.on_seq(b.seq, 65536);
+  }
+  repetidos_seguidos = 0;
   if (perdidos > 0) {
     g_perdidos += perdidos;
     if (perdidos > MAX_FILL_BLOCKS) {                            // salto grande: reiniciar historia
@@ -206,7 +229,8 @@ static void procesar_bloque(const Bloque& b) {
   }
   double suma = 0;
   for (int i = 0; i < N; ++i) { g_x[i] = muestra_a_float(b.m[i], g_p.formato, g_p.adc_mid); suma += g_x[i]; }
-  g_dc_in = float(suma / N);
+  g_dc_in = float(suma / N);                                     // antes del pasa altos: sirve para ajustar adcmid
+  g_hpf.procesar(g_x, N);                                        // quita DC y graves (< hpf Hz) antes de las dos rutas
   const float* ref = nullptr;
   if (g_ref_activa && g_ref_seq[b.seq & 3] == b.seq) {
     for (int i = 0; i < N; ++i) g_s[i] = g_ref[b.seq & 3].m[i] * (1.0f / 32768.0f);   // la referencia es siempre Q15
@@ -240,11 +264,11 @@ static void generar_bloque() {
 
 // ------------------------------------------------------------------ consola
 static void imprimir_parametros() {
-  Serial.printf("alfa=%.3f beta=%.3f ginterf=%.4f notch=%d lambda=%.2f banda=%.0f-%.0f Hz rint=%.0f-%.0f Hz modo=%s fir=%s diag=%s ref=%s fuente=%s entrada=%s(mid=%.0f)\n",
+  Serial.printf("alfa=%.3f beta=%.3f ginterf=%.4f notch=%d lambda=%.2f banda=%.0f-%.0f Hz rint=%.0f-%.0f Hz modo=%s fir=%s hpf=%.0f diag=%s ref=%s fuente=%s entrada=%s(mid=%.0f)\n",
                 g_p.alfa, g_p.beta, g_p.g_interf, g_p.notch_bins, g_p.lambda_ema, g_p.banda_lo, g_p.banda_hi,
                 g_p.rint_lo, g_p.rint_hi,
                 g_p.modo == Modo::Filtro ? "filtro" : g_p.modo == Modo::Bypass ? "bypass" : g_p.modo == Modo::Fir ? "fir" : "crudo",
-                nombre_perfil(g_fir->perfil()),
+                nombre_perfil(g_fir->perfil()), g_hpf.fc(),
                 g_p.fuente == FuenteDiag::Local ? "local" : "ext", g_ref_activa ? "on" : "off",
                 g_fuente_interna ? "generador" : "uart", g_p.formato == FormatoIn::Adc12 ? "adc12" : "q15", g_p.adc_mid);
 }
@@ -360,7 +384,7 @@ static void recomendar_ahora() {
   float f[MAX_FREQ]; int8_t sn[MAX_FREQ]; uint8_t fl[MAX_FREQ]; int n = 0;
   ParamsFrame par{};
   bool ext = false;
-  if (g_p.fuente == FuenteDiag::Externo) {
+  if (g_p.fuente == FuenteDiag::Externo && !g_fuente_interna) {
     portENTER_CRITICAL(&g_mux);
     ext = g_ext_par_ok && g_blk_actual - g_ext_par_blk < 5;
     if (ext) par = g_ext_par;
@@ -425,7 +449,8 @@ static void ayuda() {
     "  fir tono|multitono|audio|transitoria   perfil del FIR (scen lo elige solo)\n"
     "  recomendar                 que metodo conviene para el ruido actual y por que\n"
     "  reloj apll|interp|off      seguir el reloj del Nodo 1: ajustando el APLL del DAC (defecto) o remuestreando\n"
-    "  captura [bloques]          envia entrada + salidas (1-8 bloques) para graficar en la PC\n"
+    "  captura [bloques]          envia entrada + salidas (1-16 bloques) para graficar/escuchar en la PC\n"
+    "  hpf <Hz>                   pasa altos extra a la entrada (defecto 0: ya lo aplica el Nodo 1)\n"
     "  diag local|ext             origen del piso/interferentes (ext = tramas del Nodo 1, con respaldo local)\n"
     "  scen P1..P5                banda util y rango de interferencia del escenario\n"
     "  ref on|off                 referencia limpia por UART1 (metricas verdaderas); 'metrics reset' antes de la prueba\n"
@@ -449,6 +474,11 @@ static void comando(char* l) {
   else if (!strcmp(a, "bench")) benchmark();
   else if (!strcmp(a, "recomendar")) recomendar_ahora();
   else if (!strcmp(a, "captura")) iniciar_captura(b);
+  else if (!strcmp(a, "hpf") && b) {
+    const float f = constrain(atof(b), 0.0f, 400.0f);
+    g_hpf.configurar(f);
+    Serial.printf("pasa altos de entrada: %s\n", f > 0 ? String(String(f, 0) + " Hz").c_str() : "apagado");
+  }
   else if (!strcmp(a, "reloj") && b) {
     g_audio.set_modo_reloj(!strcmp(b, "interp") ? ModoReloj::Interp : !strcmp(b, "off") ? ModoReloj::Off : ModoReloj::Apll);
     Serial.printf("reloj: %s\n", g_audio.modo_reloj() == ModoReloj::Apll ? "apll (ajusta el reloj del DAC)"
@@ -497,7 +527,13 @@ static void comando(char* l) {
     if (g_ref_activa) { Serial1.setRxBufferSize(8192); Serial1.begin(BAUD, SERIAL_8N1, PIN_RX_REF, PIN_TX_REF); }   // GPIO18/19 solo se usan con la referencia
     else Serial1.end();
     reiniciar_metricas(); imprimir_parametros(); }
-  else if (!strcmp(a, "src") && b) { g_fuente_interna = !strcmp(b, "gen"); g_gen_proximo_us = micros(); imprimir_parametros(); }
+  else if (!strcmp(a, "src") && b) {
+    g_fuente_interna = !strcmp(b, "gen"); g_gen_proximo_us = micros();
+    int idx;                                     // descartar bloques viejos de la otra fuente
+    while (xQueueReceive(g_llenos, &idx, 0) == pdTRUE) xQueueSend(g_libres, &idx, 0);
+    resincronizar();                             // las dos fuentes numeran distinto
+    imprimir_parametros();
+  }
   else if (!strcmp(a, "gen") && b) {
     g_gen_f1 = atof(b); if (c) g_gen_a1 = atof(c); if (d) g_gen_f2 = atof(d); if (e) g_gen_a2 = atof(e); if (f) g_gen_ruido = atof(f);
     Serial.printf("generador: %.0f Hz x%.2f + %.0f Hz x%.2f + ruido %.2f\n", g_gen_f1, g_gen_a1, g_gen_f2, g_gen_a2, g_gen_ruido);
@@ -544,6 +580,7 @@ void setup() {
   g_fir = new (std::nothrow) SalidaFir();
   g_stats_fir = new (std::nothrow) StatsSenales();
   g_met_fir = new (std::nothrow) Metrics();
+  g_hpf.configurar(HPF_DEFECTO_HZ);
   if (!g_fir || !g_stats_fir || !g_met_fir) { Serial.println("ERROR: sin memoria para la salida FIR"); for (;;) delay(1000); }
   if (!g_nodo.begin() || !g_dlocal.begin() || !g_stats_fir->begin()) { Serial.println("ERROR: no se pudo iniciar la FFT"); for (;;) delay(1000); }
   g_diag.piso_valido = false; g_diag.n_interf = 0;
