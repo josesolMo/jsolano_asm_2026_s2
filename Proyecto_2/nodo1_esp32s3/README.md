@@ -39,12 +39,14 @@ scipy, y `pyserial` para leer la placa.
 | `p` | Parámetros actuales |
 | `u20` + Enter | Umbral C1 en dB sobre el piso (5 a 40) |
 | `b340,1420` + Enter | Banda útil en Hz (C5) |
+| `h100` + Enter | Pasa altos de adquisición en Hz (0 = apagado, por defecto 100): quita DC y graves antes del análisis, el piso que se envía y las muestras del nodo 3 |
 | `r40` + Enter | Rango de reporte: no se reporta lo que esté más de N dB bajo el tono más fuerte (10 a 80) |
 | `t` | Enciende/apaga el tono de prueba de 1000 Hz en GPIO5 (jumper GPIO5 → GPIO4) |
 | `f` | Envía el espectro del próximo bloque (lo usa `validar_nodo1.py`) |
 | `g5` + Enter | Graba 5 s (1 a 30) en la PSRAM; mientras graba no envía nada al nodo 3 |
 | `x` | Reproduce lo grabado: reemplaza al micrófono en todo el sistema (nodo 3, PC) |
 | `n` | Enciende/apaga el envío al nodo 3 |
+| `s` | Enciende/apaga las tramas binarias por USB, para leer el monitor sin basura (el enlace al nodo 3 no cambia; `validar_nodo1.py` las necesita encendidas) |
 
 Si el ADC recorta (códigos ≤ 8 o ≥ 4087), el nodo avisa `#saturacion ...` como máximo una vez por
 segundo; `e` muestra el total. Se corrige bajando la ganancia del MAX4466 o alejando el micrófono.
