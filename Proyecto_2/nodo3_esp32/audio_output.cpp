@@ -124,9 +124,9 @@ bool AudioOut::iniciar_dma() {
   c.chan_mask = DAC_CHANNEL_MASK_ALL;        // GPIO25 y GPIO26
   c.desc_num = DAC_DESC_NUM;
   c.buf_size = DAC_DESC_BYTES;
-  // En modo alternado los datos se reparten A->GPIO25, B->GPIO26, ... 'factor_alter' corrige la
-  // frecuencia si el driver la interpretara como total y no por canal ('dac x2' en la consola).
-  c.freq_hz = FS * factor_alter_;
+  // En modo alternado los datos se reparten A->GPIO25, B->GPIO26, ... y freq_hz es la frecuencia
+  // por canal (verificado en placa: el anillo se mantiene estable y los tonos suenan a su altura).
+  c.freq_hz = FS;
   c.offset = 0;
   c.clk_src = DAC_DIGI_CLK_SRC_APLL;         // el reloj por defecto no baja de 19.6 kHz
   c.chan_mode = DAC_CHANNEL_MODE_ALTER;
