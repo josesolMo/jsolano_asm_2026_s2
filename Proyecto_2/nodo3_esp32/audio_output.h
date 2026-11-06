@@ -125,9 +125,6 @@ class AudioOut {
   size_t cuadros() const { return ring.size() / CANALES_DAC; }   // nivel del anillo en cuadros
   void stop();
   void set_ganancia(float g) { ganancia_ = g; }
-  // 1 si el driver toma freq_hz por canal en modo alternado; 2 si la toma como total. Reinicia el DMA.
-  void set_factor_alter(uint32_t f) { factor_alter_ = f; quiere_ = false; }
-  uint32_t factor_alter() const { return factor_alter_; }
   float ganancia() const { return ganancia_; }
   AudioStats stats;
   SampleRing ring;
@@ -147,7 +144,6 @@ class AudioOut {
   void reposo();
   volatile bool quiere_ = true;
   float ganancia_ = DAC_GANANCIA;
-  uint32_t factor_alter_ = 1;
   void ajustar_apll();
   ModoReloj modo_reloj_ = ModoReloj::Apll;
   ControlReloj control_;

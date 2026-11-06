@@ -1,0 +1,73 @@
+% Fragmento para incluir en el informe con \input{}. Requiere amsmath y booktabs.
+% Los resultados de esta seccion son de SIMULACION en computadora; no hay mediciones en la placa.
+\subsection{Nodo 3: filtrado espectral adaptativo y evaluaci\'on}
+
+El Nodo 3 se implementa en una ESP32 cl\'asica (ESP-WROOM-32) con el n\'ucleo Arduino-ESP32 3.3.12. Recibe por UART
+bloques de $N=1024$ muestras de 16 bits muestreadas a $f_s=16\,\mathrm{kHz}$, los filtra en el dominio de la frecuencia con
+sustracci\'on espectral adaptativa, reconstruye la se\~nal por solape y suma, y la entrega por el convertidor
+digital-anal\'ogico (DAC) de 8 bits de la placa. La resoluci\'on espectral es $\Delta f=f_s/N=15{,}625\,\mathrm{Hz}$.
+
+\paragraph{An\'alisis y s\'intesis por bloques.}
+Con un avance de $H=N/2=512$ muestras (solape del $50\,\%$), cada trama se multiplica por la ventana ra\'iz de Hann
+$w[n]=\sqrt{\tfrac12\left(1-\cos\tfrac{2\pi n}{N}\right)}$, de modo que $w^2[n]+w^2[n+N/2]=1$. Sea $X_m[k]$ la FFT de la
+trama $m$ y $P_m[k]=|X_m[k]|^2/\sum_n w^2[n]$ su potencia espectral. La salida se obtiene aplicando la misma ventana tras la
+transformada inversa y sumando las mitades solapadas; con ganancia unitaria la reconstrucci\'on es exacta, lo que se usa como
+prueba del modo \emph{bypass}. La FFT compleja de 1024 puntos usa la biblioteca \texttt{esp-dsp} incluida en el n\'ucleo
+(rutina en ensamblador para Xtensa LX6, aritm\'etica de punto flotante de 32 bits). La transformada inversa se calcula como
+$\mathrm{IFFT}(Y)=\overline{\mathrm{FFT}(\overline{Y})}/N$ y la simetr\'ia conjugada $Y[N-k]=\overline{Y[k]}$ se impone
+expl\'icitamente para que la salida sea real.
+
+\paragraph{Ganancia adaptativa.}
+Con el piso de ruido por bin $\hat{\sigma}^2[k]$ estimado por el Nodo 1 (mediana de 51 bins sobre el espectro promediado
+exponencialmente con $\lambda=0{,}9$), la ganancia real es
+\begin{equation}
+  G[k]=\sqrt{\operatorname{clip}\!\left(1-\alpha\,\frac{\hat{\sigma}^2[k]}{P[k]+\varepsilon},\;\beta^2,\;1\right)},
+  \qquad \alpha=3{,}0,\ \beta=0{,}1,
+\end{equation}
+con $\varepsilon=10^{-20}$ para evitar divisiones por cero. En los $\pm4$ bins alrededor de cada interferente identificado
+se impone $G=0{,}01$ ($-40\,\mathrm{dB}$). Cualquier valor no finito del piso se trata como cero. Los par\'ametros
+$\alpha$, $\beta$, la ganancia de rechazo y el ancho del rechazo se modifican en ejecuci\'on por el puerto serial.
+
+\paragraph{Enlace y datos que requiere el nodo.}
+Las tramas PCM siguen el formato del proyecto (\texttt{A5 5A}, secuencia de 16 bits, longitud, muestras, CRC-16/CCITT-FALSE).
+Cada trama ocupa 2056 bytes, es decir $321{,}25\,\mathrm{kb/s}$ netos en 8N1, lo que equivale a $69{,}7\,\%$ de un enlace de
+$460800\,\mathrm{baud}$ y $34{,}9\,\%$ de uno de $921600\,\mathrm{baud}$. La trama de diagn\'ostico del Nodo 1 contiene frecuencias
+interferentes pero \emph{no} el piso de ruido por bin que exige la ganancia anterior. Por ello el Nodo 3 puede (a) estimar el piso
+por s\'i mismo con el mismo algoritmo del Nodo 1, o (b) recibir una extensi\'on propuesta (trama \texttt{A5 5D}) que transmite el piso en decibelios
+sobre 65 nudos (cada 8 bins); esta extensi\'on requiere acuerdo con el responsable del Nodo 1.
+
+\paragraph{Salida y evaluaci\'on.}
+La salida se escala a $128+60\,y$ y se satura a $[0,255]$; un DAC continuo temporizado por hardware (reloj APLL, DMA) la
+reproduce a $16\,\mathrm{kHz}$ independientemente del tiempo de c\'alculo, a trav\'es de un anillo de 4096 muestras. Debe seguirse de un
+filtro paso bajo de reconstrucci\'on. Con referencia limpia alineada se calculan
+$\mathrm{MSE}=\overline{(s-\hat{s})^2}$, $\mathrm{SNR}=10\log_{10}\!\big(\sum s^2/\sum(s-\hat{s})^2\big)$, la mejora de SNR y la
+energ\'ia \'util conservada. Sin referencia solo se miden la atenuaci\'on en el rango de interferencia y la potencia conservada en la
+banda \'util, y el SNR se \emph{estima} con el piso de ruido; esa estimaci\'on no sustituye al SNR verdadero (en la simulaci\'on del
+escenario P1 estima $34{,}9\,\mathrm{dB}$ mientras que el valor verdadero es $43{,}7\,\mathrm{dB}$).
+
+\paragraph{Verificaci\'on realizada.}
+El mismo c\'odigo C++ del firmware, compilado en la computadora, se compar\'o con el prototipo Python del proyecto: el error de la
+FFT respecto de \texttt{numpy} es $1{,}4\times10^{-7}$ (relativo), la reconstrucci\'on en bypass tiene error m\'aximo
+$1{,}8\times10^{-7}$ (escala $\pm1$) y las salidas filtradas de los escenarios P1, P2 y P5 difieren en menos de $3\times10^{-7}$.
+El analizador de tramas acepta exactamente las mismas tramas v\'alidas que la referencia en Python bajo p\'erdidas y errores de bit
+simulados. El sketch compila para ESP32 Dev Module y ocupa 338\,956 bytes de programa y 124\,020 bytes de variables globales.
+\textbf{No se han realizado mediciones en la placa}: los tiempos de procesamiento, el uso de memoria en ejecuci\'on, la latencia
+total, la fidelidad del DAC y el comportamiento real de la UART quedan pendientes.
+
+\begin{table}[ht]
+  \centering
+  \caption{Resultados de \emph{simulaci\'on} en computadora (C++ del firmware, 64 bloques). El DAC real es de 8 bits.}
+  \begin{tabular}{lrrrr}
+    \toprule
+    Escenario & SNR entrada (dB) & SNR salida (dB) & Mejora (dB) & SNR salida, DAC de 8 bits (dB) \\
+    \midrule
+    P1 & 5,03 & 43,75 & 38,73 & 38,19 \\
+    P2 & 0,03 & 12,47 & 12,45 & 12,39 \\
+    P5 & 0,01 &  9,93 &  9,91 &  9,88 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Limitaciones.}
+El DAC de 8 bits limita la relaci\'on se\~nal-ruido; los relojes de los nodos son independientes; el Nodo 3 no suaviza la ganancia
+entre avances; y la comparaci\'on autom\'atica con el Nodo 2 no est\'a implementada.

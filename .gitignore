@@ -233,3 +233,5 @@ __marimo__/
 Proyecto_2/nodo1_esp32s3/capturas/
 O
 Proyecto_2/audios
+Proyecto_2/nodo3_esp32/capturas/*.bin
+Proyecto_2/nodo3_esp32/capturas/*.wav

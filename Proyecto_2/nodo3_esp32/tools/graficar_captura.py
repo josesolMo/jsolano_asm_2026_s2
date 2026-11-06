@@ -31,6 +31,18 @@ PERFIL = {0: "tono", 1: "multitono", 2: "audio", 3: "transitoria"}
 CARPETA = Path(__file__).resolve().parents[1] / "capturas"
 
 
+def abrir_sin_reset(puerto, baud):
+    """Abre el puerto SIN reiniciar el ESP32: en estas placas DTR/RTS van a EN y BOOT, y abrir el
+    puerto con los valores por defecto reinicia el nodo y borra lo configurado (scen, mode, gain...)."""
+    import serial
+    ser = serial.Serial()
+    ser.port, ser.baudrate, ser.timeout = puerto, baud, 0.2
+    ser.dtr = False
+    ser.rts = False
+    ser.open()
+    return ser
+
+
 def crc16(datos: bytes) -> int:
     c = 0xFFFF
     for b in datos:
@@ -172,8 +184,7 @@ def main():
     else:
         if not a.puerto:
             ap.error("indique el puerto (p. ej. COM7) o --archivo")
-        import serial
-        ser = serial.Serial(a.puerto, 115200, timeout=0.2)
+        ser = abrir_sin_reset(a.puerto, 115200)
         time.sleep(0.3)
         ser.reset_input_buffer()
         ser.write(f"captura {a.bloques}\n".encode())

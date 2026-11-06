@@ -22,7 +22,7 @@
 //   u20            umbral C1 en dB sobre el piso (5 a 40)
 //   b340,1420      banda util en Hz (C5): lo que cae dentro no se reporta como ruido
 //   r40            rango de reporte en dB bajo el tono mas fuerte (10 a 80)
-//   h100           pasa altos de adquisicion en Hz (0 = apagado; 0 a 400)
+//   h100           pasa altos de adquisicion en Hz (0 = apagado, el defecto; 0 a 400)
 // Grabar y reproducir (la salida limpia puede sonar despues, sin mezclarse con el
 // sonido contaminado que entra al microfono):
 //   g5             graba 5 s (1 a 30) en la PSRAM; mientras graba no envia nada al nodo 3
@@ -61,7 +61,7 @@ constexpr uint32_t BAUD_NODO3 = 921600; // igual que config.h del nodo 3
 constexpr uint32_t MAX_SEGUNDOS = 30;   // grabacion: 30 s x 16 kHz x 2 B = 960 KB de PSRAM
 // Saturacion: codigos pegados a los extremos del ADC (0 V o ~3.1 V con 12 dB de atenuacion).
 // Una muestra recortada agrega armonicos que no estan en el sonido y el filtro no puede quitar.
-constexpr float HPF_DEFECTO_HZ = 100.0f;
+constexpr float HPF_DEFECTO_HZ = 0.0f;   // apagado: en placa agrego chasquidos audibles sin mejorar P1 (h100 lo enciende)
 constexpr uint16_t SAT_BAJO = 8;
 constexpr uint16_t SAT_ALTO = 4087;
 

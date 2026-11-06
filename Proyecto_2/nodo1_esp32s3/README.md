@@ -11,7 +11,7 @@ el puerto serial (USB) las muestras y el diagnóstico de cada bloque, y por la U
 | 1. Captura a 16 kHz y tramas con CRC | Listo, probado en la placa |
 | 2. DC + Hann + FFT en la placa | Listo; se valida contra numpy con `validar_nodo1.py` |
 | 3. Receptor (C1–C5) en la placa | Listo; se valida contra Python con `validar_nodo1.py` |
-| 4. Enlace con el nodo 3 | Listo por UART (no SPI): PCM + PARAMS + PISO; probado en la PC contra el parser del nodo 3 (`probar_enlace.py`). Falta probarlo con las dos placas |
+| 4. Enlace con el nodo 3 | Listo por UART (no SPI): PCM + PARAMS + PISO; probado en la PC (`probar_enlace.py`) y con las dos placas (P1–P5, 0 errores de CRC) |
 | 5. Parámetros sin recompilar, tiempos y memoria | Comandos listos; tiempo medido en la placa (~5 ms de 32 ms); fs real del ADC 16 028 Hz |
 
 ## Archivos
@@ -39,7 +39,7 @@ scipy, y `pyserial` para leer la placa.
 | `p` | Parámetros actuales |
 | `u20` + Enter | Umbral C1 en dB sobre el piso (5 a 40) |
 | `b340,1420` + Enter | Banda útil en Hz (C5) |
-| `h100` + Enter | Pasa altos de adquisición en Hz (0 = apagado, por defecto 100): quita DC y graves antes del análisis, el piso que se envía y las muestras del nodo 3 |
+| `h100` + Enter | Pasa altos de adquisición en Hz (por defecto 0 = apagado; en placa no mejoró P1 y agregó chasquidos audibles): quita DC y graves antes del análisis, el piso que se envía y las muestras del nodo 3 |
 | `r40` + Enter | Rango de reporte: no se reporta lo que esté más de N dB bajo el tono más fuerte (10 a 80) |
 | `t` | Enciende/apaga el tono de prueba de 1000 Hz en GPIO5 (jumper GPIO5 → GPIO4) |
 | `f` | Envía el espectro del próximo bloque (lo usa `validar_nodo1.py`) |

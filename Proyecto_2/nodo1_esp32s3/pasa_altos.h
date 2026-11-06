@@ -1,7 +1,7 @@
 #pragma once
 #include <cmath>
 
-// Pasa altos de adquisicion (comando h<Hz>; defecto 100 Hz, h0 lo apaga).
+// Pasa altos de adquisicion (comando h<Hz>; apagado por defecto, h100 lo enciende).
 // Butterworth de 2o orden (biquad RBJ, Q = 1/sqrt(2)), forma directa II transpuesta.
 // Quita el DC y el ruido grave del microfono y su alimentacion (0-200 Hz, visto en capturas en
 // silencio) ANTES de todo: el analisis, el piso de ruido que se envia y las muestras que recibe el
