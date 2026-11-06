@@ -10,10 +10,9 @@ señal por solape y suma y la entrega por el DAC. También calcula las métricas
 > | Código implementado | Sí: UART, parser, FFT/IFFT, filtro, overlap‑add, DAC continuo, métricas, consola |
 > | Compilación Arduino (`esp32:esp32:esp32`, núcleo 3.3.12) | **Aprobada**, sin advertencias con `--warnings all` |
 > | Pruebas simuladas en el PC (C++ del firmware contra Python) | **Aprobadas** (43 comprobaciones, `tests/resultados_pc.txt`) |
-> | **Pruebas en la placa** (UART real, DAC, tiempos, memoria en ejecución) | **PENDIENTES. Nada de esto se ha ejecutado en una ESP32.** |
+> | **Pruebas en la placa** (UART real, DAC, tiempos, memoria en ejecución) | **Aprobadas** el 5/11/2026 con el sistema completo: P1–P5 por el aire, 0 errores de CRC, 0 bloques perdidos, 12,3 ms por bloque (las dos rutas) de 64 ms |
 >
-> No había ninguna placa conectada al preparar este trabajo. Toda cifra de tiempo, memoria en ejecución o calidad del
-> DAC que aparezca en este documento como «a medir» debe obtenerse con los comandos `bench` y `status` de §9.
+> Los resultados medidos en placa (capturas, métricas y recomendaciones de P1–P5) están en el documento de resultados del grupo y en `capturas/`.
 
 ## 1. Función del nodo
 
@@ -111,11 +110,13 @@ Valores iniciales (los de `config.py`): α = 3,0, β = 0,1, `G_interf` = 0,01, `
 | `filter` | filtro adaptativo |
 | `fir` | filtro temporal del Nodo 2 (FIR de `coeficientes.h`), retardado HOP como los demás; `scen` elige el perfil |
 
+El último `scen` se guarda en la flash y se restaura al arrancar: abrir el monitor serie del IDE reinicia el ESP32 (DTR/RTS), y
+sin esto el nodo volvería en silencio a la banda y al perfil FIR por defecto. `tools/` abre el puerto sin reiniciar.
+
 `mode` solo elige qué sale por **GPIO25** (parlante). Las dos rutas —espectral (Nodo 3) y FIR (Nodo 2)— procesan
 cada avance a la vez, cada una con sus métricas (`metrics` las muestra lado a lado), y **GPIO26** saca siempre el FIR:
 dos rutas independientes y dos salidas comparables en un mismo ESP32, como permite el enunciado. Los dos DAC van en modo
-alternado (`DAC_CHANNEL_MODE_ALTER`); si un tono sonara una octava abajo y el anillo se llenara, `dac x2` corrige la
-frecuencia.
+alternado (`DAC_CHANNEL_MODE_ALTER`), con `freq_hz` por canal (verificado en placa).
 
 `hpf <Hz>` (`pasa_altos.h`, por defecto **0**): pasa altos extra a la entrada. El pasa altos de 100 Hz va en el **Nodo 1**
 (`h100`), antes del análisis: así el piso que envía el Nodo 1 y la señal que filtra este nodo son la misma. Con el filtro solo
@@ -173,12 +174,12 @@ Ejecutar: `PY=.venv/bin/python ./ejecutar_pruebas.sh` (requiere g++, numpy, scip
 | # | Prueba | Cómo | Resultado |
 |---|---|---|---|
 | 1 | Compilación Arduino | `arduino-cli compile` (§5) | **Aprobada**, 0 advertencias |
-| 2 | Recepción UART | parser C++ contra `link.empaquetar` y `receptor_fft.empaquetar`; fragmentación de 1 a 4096 B, basura, truncadas, BER 1e‑5…5e‑4, pérdidas 0‑20 %, `seq` con envoltura | **Aprobada (PC)**: acepta exactamente las mismas tramas que `link.desempaquetar_flujo`; 0 tramas dañadas aceptadas. **En cable real: pendiente** |
+| 2 | Recepción UART | parser C++ contra `link.empaquetar` y `receptor_fft.empaquetar`; fragmentación de 1 a 4096 B, basura, truncadas, BER 1e‑5…5e‑4, pérdidas 0‑20 %, `seq` con envoltura | **Aprobada (PC)**: acepta exactamente las mismas tramas que `link.desempaquetar_flujo`; 0 tramas dañadas aceptadas. **En cable real (17 → D16, 921 600 baud): aprobada**, 0 errores de CRC en P1–P5 |
 | 3 | FFT/IFFT | contra `numpy.fft` | **Aprobada (PC)**: error relativo 1,4e‑7; IFFT(FFT(x)) = x con 7e‑7 |
 | 4 | Reconstrucción | bypass sobre ruido de 65 536 muestras | **Aprobada (PC)**: error 1,8e‑7 (escala ±1); sin discontinuidades añadidas |
 | 5 | Filtrado P1, P2, P5 | salida C++ (float32) contra `NodoEspectral` (float64) | **Aprobada (PC)**: error ≤ 2,7e‑7 con el mismo diagnóstico; ≤ 2,6e‑7 con el diagnóstico local |
-| 6 | Rendimiento | `bench` en la placa | **PENDIENTE (hardware)** |
-| 7 | P1–P6 | `scen`, `src gen`, `simular_nodo1.py` | P1, P2, P5 simuladas en PC; **P3, P4, P6 no ejecutadas**; todo en placa **pendiente** |
+| 6 | Rendimiento | `status` / `metrics` en la placa | **Medido**: 12,2–12,4 ms por bloque con las dos rutas (19 % de 64 ms), 0 excedidos; heap libre ≈ 169 KB |
+| 7 | P1–P5 | grabación `g15` + `x`, `scen`, captura | **Ejecutadas en placa**: P1 40,0/40,7 dB (espectral/FIR), P2 8,8/45,1 dB, P3 y P5 el espectral es el único que reduce el ruido en la banda útil, P4 ninguno elimina los impulsos. P6 se hace en la defensa |
 
 Resultados de simulación en el PC (escenarios del proyecto, 64 bloques; Python float64 frente al C++ del firmware):
 
@@ -200,9 +201,8 @@ coinciden en 64/64 bloques en P1, P2 y P5.
 
 ## 10. Problemas conocidos y limitaciones
 
-- **Nada medido en placa:** tiempos de FFT/bloque, memoria dinámica, latencia, fidelidad del DAC, comportamiento de la UART a 921 600.
-  Una estimación analítica (`metrics.costo_estimado`) da ≈ 1,8 MFLOP/s para FFT+IFFT, muy por debajo de la capacidad de la ESP32, pero
-  es una estimación; falta además el costo del diagnóstico local (mediana de 51 bins × 513) y la consola.
+- **Medido en placa:** 12,3 ms por bloque con las dos rutas (la estimación analítica de `metrics.costo_estimado` daba ≈ 1,8 MFLOP/s
+  solo para FFT+IFFT); latencia algorítmica de 96 ms + 32 ms de DMA + 24–48 ms de búfer; UART sin errores a 921 600 baud.
 - **DAC de 8 bits**, no 12 como supone `config.py` (efecto simulado arriba). El arranque del DMA puede producir un transitorio audible/visible
   (la salida pasa del reposo a 128 al arrancar el continuo): no verificado.
 - **Sin reloj común:** emisor, Nodo 1 y Nodo 3 tienen cristales distintos (en placa: el ADC del Nodo 1 va ~0,36 % más rápido que

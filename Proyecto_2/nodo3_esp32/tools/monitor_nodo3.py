@@ -16,7 +16,12 @@ ESCUCHA = {0: "filter (espectral, Nodo 3)", 1: "bypass", 2: "raw (sin filtrar)",
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
-    ser = serial.Serial(sys.argv[1], 115200, timeout=0.2)
+    # sin reiniciar el nodo: DTR/RTS de estas placas van a EN y BOOT
+    ser = serial.Serial()
+    ser.port, ser.baudrate, ser.timeout = sys.argv[1], 115200, 0.2
+    ser.dtr = False
+    ser.rts = False
+    ser.open()
     plot = "--plot" in sys.argv
     hist = {k: [] for k in COLS}
     threading.Thread(target=lambda: [ser.write((l + "\n").encode()) for l in sys.stdin], daemon=True).start()

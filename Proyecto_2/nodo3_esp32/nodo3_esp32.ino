@@ -21,6 +21,7 @@
 #include "recomendacion.h"
 #include "captura.h"
 #include "pasa_altos.h"
+#include <Preferences.h>
 #include <new>
 
 #if !CONFIG_IDF_TARGET_ESP32
@@ -361,6 +362,13 @@ static void benchmark() {
                 (unsigned long)(1000000ull * N / FS));
 }
 
+// El ultimo 'scen' se guarda en la flash (NVS): abrir el monitor serie reinicia el ESP32 (DTR/RTS)
+// y sin esto el nodo volveria a la banda y al perfil FIR por defecto sin que nadie lo note.
+static void guardar_escenario(const char* id) {
+  Preferences pr;
+  if (pr.begin("nodo3", false)) { pr.putString("scen", id); pr.end(); }
+}
+
 static void escenario(const char* id) {
   struct E { const char* id; float blo, bhi, rlo, rhi; PerfilFir fir; };
   static const E t[] = {{"P1", 900, 1100, 2485, 2515, PerfilFir::Tono}, {"P2", 340, 1420, 4500, 7500, PerfilFir::Multitono},
@@ -373,6 +381,7 @@ static void escenario(const char* id) {
       reiniciar_metricas();
       Serial.printf("Escenario %s: banda util %.0f-%.0f Hz, rango de interferencia %.0f-%.0f Hz, perfil FIR %s. Metricas reiniciadas.\n",
                     e.id, e.blo, e.bhi, e.rlo, e.rhi, nombre_perfil(e.fir));
+      guardar_escenario(e.id);
       return;
     }
   Serial.println("P6 (desconocido): fije 'set band lo hi' y 'set rint lo hi' segun la prueba. IDs validos: P1..P5.");
@@ -416,9 +425,18 @@ static void iniciar_captura(const char* arg) {
   if (g_cap_estado != EstadoCaptura::Libre) { Serial.println("#captura en curso"); return; }
   int bloques = arg ? atoi(arg) : 4;
   if (bloques < 1 || bloques > int(CAPTURA_MAX_BLOQUES)) bloques = 4;
-  g_cap_n = size_t(bloques) * N;
-  g_cap = static_cast<uint8_t*>(malloc(captura_tamano(g_cap_n)));
+  // El heap libre esta repartido en pedazos: si no hay un bloque contiguo para todo lo pedido,
+  // se captura lo que entre (bajando de a un bloque) y se avisa.
+  const int pedidos = bloques;
+  for (; bloques >= 1; --bloques) {
+    g_cap_n = size_t(bloques) * N;
+    g_cap = static_cast<uint8_t*>(malloc(captura_tamano(g_cap_n)));
+    if (g_cap) break;
+  }
   if (!g_cap) { Serial.println("#error sin memoria para la captura"); return; }
+  if (bloques < pedidos)
+    Serial.printf("#captura: no hay memoria contigua para %d bloques; se capturan %d (bloque libre mayor: %lu B)\n",
+                  pedidos, bloques, (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   g_cap_idx = 0;
   Serial.printf("#captura %d bloques (%.0f ms); se envia en binario (tools/graficar_captura.py)\n",
                 bloques, 1000.0 * g_cap_n / FS);
@@ -458,8 +476,7 @@ static void ayuda() {
     "  baud <n>                   velocidad de la UART2 (debe coincidir con el Nodo 1; defecto 921600)\n"
     "  src uart|gen               fuente: UART2 (Nodo 1) o generador interno\n"
     "  gen f1 a1 f2 a2 ruido      generador: dos tonos (Hz, amplitud 0-1) + ruido blanco (amplitud)\n"
-    "  gain <codigos>             ganancia del DAC (127 = escala completa), dac stop|start\n"
-    "  dac x1|x2                  si el tono suena una octava abajo y el anillo se llena: dac x2");
+    "  gain <codigos>             ganancia del DAC (127 = escala completa), dac stop|start");
 }
 
 static void comando(char* l) {
@@ -539,12 +556,7 @@ static void comando(char* l) {
     Serial.printf("generador: %.0f Hz x%.2f + %.0f Hz x%.2f + ruido %.2f\n", g_gen_f1, g_gen_a1, g_gen_f2, g_gen_a2, g_gen_ruido);
   }
   else if (!strcmp(a, "gain") && b) { g_audio.set_ganancia(constrain(atof(b), 0.0f, 127.0f)); Serial.printf("ganancia DAC = %.1f codigos\n", g_audio.ganancia()); }
-  else if (!strcmp(a, "dac") && b) {
-    if (!strcmp(b, "stop")) g_audio.stop();
-    else if (!strcmp(b, "x1") || !strcmp(b, "x2")) g_audio.set_factor_alter(b[1] == '2' ? 2 : 1);   // reinicia el DMA
-    Serial.printf("dac: factor de frecuencia en modo alternado = x%lu; el DMA arranca solo al acumular el prefill\n",
-                  (unsigned long)g_audio.factor_alter());
-  }
+  else if (!strcmp(a, "dac") && b) { if (!strcmp(b, "stop")) g_audio.stop(); Serial.println("dac: el DMA arranca solo al acumular el prefill"); }
   else Serial.println("comando desconocido; escriba help");
 }
 
@@ -597,6 +609,12 @@ void setup() {
   Serial.printf("FFT: %s | UART2 RX=GPIO%d a %lu baud | DAC: GPIO25 (8 bits, %lu Hz, APLL)\n", g_nodo.backend(),
                 PIN_RX_NODO1, (unsigned long)BAUD, (unsigned long)FS);
   Serial.printf("Heap libre tras iniciar: %lu B. Escriba 'help'.\n", (unsigned long)ESP.getFreeHeap());
+  {                                                  // restaurar el ultimo escenario elegido
+    Preferences pr;
+    String id;
+    if (pr.begin("nodo3", true)) { id = pr.getString("scen", ""); pr.end(); }
+    if (id.length()) { Serial.print("(restaurado de la flash) "); escenario(id.c_str()); }
+  }
   imprimir_parametros();
 }
 
