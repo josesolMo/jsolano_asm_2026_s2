@@ -1,0 +1,31 @@
+{
+  "atol": 2e-06,
+  "rtol": 2e-05,
+  "numpy": "2.4.6",
+  "resultados": {
+    "tono": {
+      "casos": 56,
+      "error_absoluto_maximo": 2.580548810193761e-07,
+      "rizado_db": 0.4843977409766109,
+      "atenuacion_db": 40.25444274519388
+    },
+    "multitono": {
+      "casos": 56,
+      "error_absoluto_maximo": 3.0578900700461986e-07,
+      "rizado_db": 0.39669613940023946,
+      "atenuacion_db": 41.981445302888865
+    },
+    "audio": {
+      "casos": 56,
+      "error_absoluto_maximo": 2.787327687547858e-07,
+      "rizado_db": 0.4438203614471861,
+      "atenuacion_db": 41.00823394295797
+    },
+    "transitoria": {
+      "casos": 56,
+      "error_absoluto_maximo": 2.921373425390783e-07,
+      "rizado_db": 0.4681134238884174,
+      "atenuacion_db": 40.5647481343571
+    }
+  }
+}
